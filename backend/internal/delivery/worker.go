@@ -95,10 +95,12 @@ func (w *Worker) runChannel(ctx, work context.Context, ch content.Channel) {
 
 // claim fills the buffer until ctx is cancelled. Handing a claimed row to a
 // sender blocks while every sender is busy, which keeps the number of rows
-// claimed but not yet sent small.
+// claimed but not yet sent small. A claim runs under work, not ctx: a stop
+// that arrives mid-claim must not cancel a query whose update may already
+// have leased the rows, or those rows would sit out their lease.
 func (w *Worker) claim(ctx, work context.Context, ch content.Channel, jobs chan<- Job) {
 	for ctx.Err() == nil {
-		claimed, err := w.Queue.Claim(ctx, ch, w.Batch)
+		claimed, err := w.Queue.Claim(work, ch, w.Batch)
 		if err != nil && ctx.Err() == nil {
 			w.Logger.Error("claim failed", "channel", ch, "err", err)
 		}

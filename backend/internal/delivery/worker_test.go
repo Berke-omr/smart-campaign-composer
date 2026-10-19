@@ -373,6 +373,31 @@ func pick(cond bool, then mockprovider.Outcome) mockprovider.Outcome {
 	return mockprovider.Accept
 }
 
+// TestGracefulStopLeavesNothingClaimed: on SIGTERM the worker stops
+// claiming and finishes what it holds, so no row waits for its lease. The
+// stops land at ten different moments, so some of them hit a claim in
+// progress (the claim must complete and hand its rows over).
+func TestGracefulStopLeavesNothingClaimed(t *testing.T) {
+	r := newRig(t, 2000, config.MockProvider{LatencyMin: 5 * time.Millisecond, LatencyMax: 20 * time.Millisecond})
+	r.campaign(t, 1200, 1200)
+	for i := range 10 {
+		after := 150*time.Millisecond + time.Duration(i)*97*time.Millisecond
+		ctx, cancel := context.WithTimeout(context.Background(), after)
+		start := time.Now()
+		r.worker(time.Second).Run(ctx)
+		cancel()
+		if n := r.count(t, `SELECT count(*) FROM deliveries WHERE status = 'sending'`); n != 0 {
+			t.Errorf("stopped after %s: %d rows still claimed", after, n)
+		}
+		if took := time.Since(start) - after; took > time.Second {
+			t.Errorf("draining took %s", took)
+		}
+	}
+	if n := r.count(t, `SELECT count(*) FROM deliveries WHERE status = 'sent'`); n == 0 || n == 2400 {
+		t.Errorf("%d of 2400 sent; the stops should land mid-campaign", n)
+	}
+}
+
 // TestWorkerKilledMidCampaign: a worker process is killed with SIGKILL in
 // the middle of a campaign and a new one is started. Rows the dead worker
 // had claimed come back when their lease runs out; every delivery ends
