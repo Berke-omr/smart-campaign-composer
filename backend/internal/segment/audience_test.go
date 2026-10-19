@@ -6,9 +6,11 @@ import (
 	"slices"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/content"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/seed"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/testdb"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/users"
@@ -273,4 +275,133 @@ func oracleNumber(v, unit int64, c genCondition) bool {
 		return v >= x(0) && v <= x(1)
 	}
 	panic("oracle: number op " + c.op)
+}
+
+func TestReach(t *testing.T) {
+	a := Audience{Total: 177, SMSReachable: 99, EmailReachable: 133}
+	both := a.Reach([]content.Channel{content.SMS, content.Email})
+	if both.SMSExcluded != 78 || both.EmailExcluded != 44 || both.ChannelMessages != 232 {
+		t.Errorf("both channels = %+v, want 78 / 44 excluded and 232 messages", both)
+	}
+	smsOnly := a.Reach([]content.Channel{content.SMS})
+	if smsOnly.ChannelMessages != 99 || smsOnly.EmailExcluded != 44 {
+		t.Errorf("SMS only = %+v, want 99 messages (exclusions are still reported)", smsOnly)
+	}
+}
+
+// oracleLongest is LongestValues written in Go over the generated users.
+// It returns the maximum length per variable and channel; values with that
+// length are all acceptable answers (ties are ordered by the DB collation).
+func oracleLongest(us []seed.User, g genRule) map[content.Channel]map[content.Variable]int {
+	out := map[content.Channel]map[content.Variable]int{content.SMS: {}, content.Email: {}}
+	for _, u := range us {
+		if !oracleMatches(u, g) {
+			continue
+		}
+		reach := map[content.Channel]bool{
+			content.SMS:   u.SMSOptIn && u.Phone != nil,
+			content.Email: u.EmailOptIn && u.Email != nil,
+		}
+		for ch, ok := range reach {
+			if !ok {
+				continue
+			}
+			for v, val := range map[content.Variable]string{content.FirstName: u.FirstName, content.LastName: u.LastName, content.City: u.City} {
+				out[ch][v] = max(out[ch][v], utf8.RuneCountInString(val))
+			}
+		}
+	}
+	return out
+}
+
+func TestLongestValuesMatchOracle(t *testing.T) {
+	pool, reg, generated := seededDB(t, 5000)
+	counter := NewCounter(pool)
+	ctx := context.Background()
+	rng := rand.New(rand.NewPCG(9, 9))
+
+	check := func(raw []byte, g genRule) {
+		t.Helper()
+		v, err := ParseAndValidate(raw, reg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := counter.LongestValues(ctx, v, asOf)
+		if err != nil {
+			t.Fatalf("LongestValues %s: %v", raw, err)
+		}
+		want := oracleLongest(generated, g)
+		for _, ch := range content.Channels {
+			for _, variable := range content.Variables {
+				if n := utf8.RuneCountInString(got[ch][variable]); n != want[ch][variable] {
+					t.Fatalf("rule %s, %s %s = %q (%d characters), oracle says %d",
+						raw, ch, variable, got[ch][variable], n, want[ch][variable])
+				}
+			}
+		}
+	}
+
+	r, _ := Parse([]byte(sampleBrief))
+	check([]byte(sampleBrief), genRule{match: r.Match, conds: []genCondition{
+		{field: "city", op: OpEq, strs: []string{"İstanbul"}},
+		{field: "last_cart_add_at", op: OpWithinLastDays, days: 30},
+		{field: "last_purchase_at", op: OpNotWithinLastDays, days: 30},
+	}})
+	for range 60 {
+		raw, g := randomRule(rng, reg)
+		check(raw, g)
+	}
+
+	v, _ := ParseAndValidate([]byte(sampleBrief), reg)
+	got, _ := counter.LongestValues(ctx, v, asOf)
+	t.Logf("sample brief longest values: SMS %v, email %v", got[content.SMS], got[content.Email])
+}
+
+func TestLongestValuesOfEmptyAudience(t *testing.T) {
+	pool, reg, _ := seededDB(t, 200)
+	v, err := ParseAndValidate([]byte(`{"match":"all","conditions":[{"field":"order_count","op":"gt","value":1000}]}`), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := NewCounter(pool).LongestValues(context.Background(), v, asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ch := range content.Channels {
+		for _, variable := range content.Variables {
+			if got[ch][variable] != "" {
+				t.Errorf("%s %s = %q, want empty", ch, variable, got[ch][variable])
+			}
+		}
+	}
+}
+
+func TestPostgresCountsCharactersLikeGo(t *testing.T) {
+	// The worst-case check compares Postgres's char_length with Go's rune
+	// count; they must agree on every name and city in the seed.
+	pool, _, _ := seededDB(t, 5000)
+	rows, err := pool.Query(context.Background(),
+		`SELECT v, char_length(v) FROM (SELECT first_name FROM users UNION SELECT last_name FROM users UNION SELECT city FROM users) AS t(v)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	n, multiByte := 0, 0
+	for rows.Next() {
+		var v string
+		var pgLen int
+		if err := rows.Scan(&v, &pgLen); err != nil {
+			t.Fatal(err)
+		}
+		if goLen := utf8.RuneCountInString(v); goLen != pgLen {
+			t.Errorf("%q: Postgres %d, Go %d", v, pgLen, goLen)
+		}
+		if len(v) != pgLen {
+			multiByte++
+		}
+		n++
+	}
+	if multiByte == 0 {
+		t.Fatalf("none of %d values has a multi-byte character; the test proves nothing", n)
+	}
 }

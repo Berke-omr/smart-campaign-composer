@@ -16,10 +16,18 @@ func TestDescribe(t *testing.T) {
 		{`{"field":"language","op":"eq","value":"en"}`, "Language is English"},
 		{`{"field":"order_count","op":"between","value":[1,3]}`, "Order count is between 1 and 3"},
 		{`{"field":"total_spent","op":"gte","value":1500.5}`, "Total spent (TRY) is at least 1500.5"},
-		{`{"field":"last_cart_add_at","op":"within_last_days","value":1}`, "Last added to cart: within the last 1 day"},
-		{`{"field":"last_purchase_at","op":"not_within_last_days","value":30}`, "Last purchase: not within the last 30 days (or never)"},
-		{`{"field":"created_at","op":"not_within_last_days","value":30}`, "Signed up: not within the last 30 days"},
-		{`{"field":"last_purchase_at","op":"is_null"}`, "Last purchase: never"},
+		// Wording from the design (D22).
+		{`{"field":"last_cart_add_at","op":"within_last_days","value":30}`, "Added to cart in the last 30 days"},
+		{`{"field":"last_cart_add_at","op":"within_last_days","value":1}`, "Added to cart in the last 1 day"},
+		{`{"field":"last_purchase_at","op":"not_within_last_days","value":30}`, "No purchase in the last 30 days"},
+		{`{"field":"last_cart_add_at","op":"not_within_last_days","value":14}`, "Nothing added to cart in the last 14 days"},
+		{`{"field":"last_cart_add_at","op":"is_null"}`, "Never added to cart"},
+		{`{"field":"last_cart_add_at","op":"is_not_null"}`, "Has added to cart"},
+		{`{"field":"last_purchase_at","op":"within_last_days","value":7}`, "Purchased in the last 7 days"},
+		{`{"field":"last_purchase_at","op":"is_null"}`, "Never purchased"},
+		{`{"field":"last_purchase_at","op":"is_not_null"}`, "Has purchased"},
+		{`{"field":"created_at","op":"within_last_days","value":30}`, "Signed up in the last 30 days"},
+		{`{"field":"created_at","op":"not_within_last_days","value":30}`, "Signed up more than 30 days ago"},
 	}
 	for _, tt := range tests {
 		v, err := ParseAndValidate([]byte(one(tt.cond)), reg)
@@ -47,9 +55,10 @@ func TestDescribeSummary(t *testing.T) {
 	want := Description{
 		Summary: "Users matching all of the following",
 		Lines: []string{
+			// The design's audience card (D22).
 			"City is İstanbul",
-			"Last added to cart: within the last 30 days",
-			"Last purchase: not within the last 30 days (or never)",
+			"Added to cart in the last 30 days",
+			"No purchase in the last 30 days",
 		},
 	}
 	if d := Describe(v); d.Summary != want.Summary || !slices.Equal(d.Lines, want.Lines) {

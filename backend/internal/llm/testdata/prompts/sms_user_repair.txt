@@ -1,0 +1,24 @@
+Write the SMS for this campaign.
+
+<brief>
+Son 30 günde sepetine ürün ekleyip alışveriş yapmayan İstanbul'daki kullanıcılara %30 indirim hatırlatması gönder. Samimi ama kısa olsun.
+</brief>
+
+Tone: friendly
+Campaign: Cart reminder — İstanbul
+Audience: City is İstanbul; Added to cart in the last 30 days; No purchase in the last 30 days
+
+Characters each variable takes (the longest value among this audience):
+- {{first_name}}: 13 ("Muhammed Emin")
+- {{last_name}}: 13 ("Hacıosmanoğlu")
+- {{city}}: 8 ("İstanbul")
+
+Your previous answer was rejected:
+<previous_answer>
+{"text":"Merhaba {{first_name}}, sepetindeki ürünler seni bekliyor! ..."}
+</previous_answer>
+
+Problems found by the validator:
+- text is 172 characters with the longest values filled in; the limit is 160. Remove at least 12 characters.
+
+Return a corrected answer that fixes every problem.

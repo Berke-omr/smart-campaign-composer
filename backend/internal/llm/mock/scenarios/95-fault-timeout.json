@@ -1,0 +1,10 @@
+{
+  "id": "fault-timeout",
+  "brief": "[test] The email never answers, so every attempt times out; the SMS is fine.",
+  "channels": ["sms", "email"],
+  "tone": "friendly",
+  "segment": [{"answer": {"campaign_name": "Fault test — İstanbul", "rule": {"match": "all", "conditions": [{"field": "city", "op": "eq", "value": "İstanbul"}, {"field": "last_cart_add_at", "op": "within_last_days", "value": 30}]}, "unsupported_criteria": []}}],
+  "sms": [{"answer": {"text": "Merhaba {{first_name}}, sepetindeki ürünler seni bekliyor!"}}],
+  "email": [{"fault": "timeout"}],
+  "expect": {"segment": "valid@1", "sms": "valid@1", "email": "needs_manual_edit"}
+}

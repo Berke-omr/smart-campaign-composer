@@ -1,0 +1,20 @@
+{
+  "id": "winback-90-days",
+  "example": true,
+  "title": "Win-back 90 days",
+  "brief": "İstanbul veya Ankara'da yaşayıp son 90 gündür alışveriş yapmamış kullanıcılara bizi özlediniz mi mesajı gönder.",
+  "channels": ["sms", "email"],
+  "tone": "friendly",
+  "segment": [
+    {"answer": {"campaign_name": "Win-back 90 days", "rule": {"match": "all", "conditions": [
+      {"field": "city", "op": "in", "value": ["İstanbul", "Ankara"]},
+      {"field": "last_purchase_at", "op": "not_within_last_days", "value": 90}]}, "unsupported_criteria": []}}
+  ],
+  "sms": [
+    {"answer": {"text": "{{first_name}}, seni özledik! Yeni ürünlerimize göz atmak için uygulamaya uğra, seni bekliyoruz."}}
+  ],
+  "email": [
+    {"answer": {"subject": "{{first_name}}, seni özledik", "body": "Merhaba {{first_name}},\n\nBir süredir görüşemedik ve seni özledik.\n\nSen yokken yeni ürünler geldi; göz atmak için uygulamaya uğramanı çok isteriz.\n\nGörüşmek üzere,\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "sms": "valid@1", "email": "valid@1"}
+}

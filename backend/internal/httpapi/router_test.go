@@ -2,12 +2,14 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/mock"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/logging"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/users"
 )
@@ -76,5 +78,50 @@ func TestUserStatsRejectsWrongMethod(t *testing.T) {
 	rec := serve(t, Deps{UserStats: fakeStats{}}, http.MethodPost, "/api/stats/users")
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+}
+
+func TestConfigReportsLLMMode(t *testing.T) {
+	model := "claude-sonnet-5-5"
+	tests := []struct {
+		name string
+		llm  LLMInfo
+		want string
+	}{
+		{"mock", LLMInfo{Mode: "mock"}, `{"llm":{"mode":"mock","model":null}}` + "\n"},
+		{"anthropic", LLMInfo{Mode: "anthropic", Model: &model}, `{"llm":{"mode":"anthropic","model":"claude-sonnet-5-5"}}` + "\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := serve(t, Deps{LLM: tt.llm}, http.MethodGet, "/api/config")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			if body := rec.Body.String(); body != tt.want {
+				t.Errorf("body = %q, want %q", body, tt.want)
+			}
+		})
+	}
+}
+
+func TestBriefExamples(t *testing.T) {
+	rec := serve(t, Deps{}, http.MethodGet, "/api/briefs/examples")
+	if rec.Code != http.StatusOK || rec.Body.String() != "{\"examples\":[]}\n" {
+		t.Fatalf("no examples: status %d body %q", rec.Code, rec.Body)
+	}
+
+	cat, err := mock.LoadCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = serve(t, Deps{Examples: cat.Examples()}, http.MethodGet, "/api/briefs/examples")
+	var got struct {
+		Examples []mock.Example `json:"examples"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Examples) != 5 || got.Examples[0].Title != "Cart reminder — İstanbul" || got.Examples[0].Tone != "friendly" {
+		t.Errorf("examples = %+v", got.Examples)
 	}
 }

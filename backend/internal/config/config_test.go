@@ -125,3 +125,81 @@ func TestLoadErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadLLMProviderSelection(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		want LLMMode
+	}{
+		{"auto without key runs the mock", map[string]string{}, LLMModeMock},
+		{"auto with key runs anthropic", map[string]string{"ANTHROPIC_API_KEY": "k"}, LLMModeAnthropic},
+		{"explicit auto with key", map[string]string{"LLM_PROVIDER": "auto", "ANTHROPIC_API_KEY": "k"}, LLMModeAnthropic},
+		{"whitespace key counts as no key", map[string]string{"ANTHROPIC_API_KEY": "  \n"}, LLMModeMock},
+		{"mock wins over a key", map[string]string{"LLM_PROVIDER": "mock", "ANTHROPIC_API_KEY": "k"}, LLMModeMock},
+		{"explicit anthropic", map[string]string{"LLM_PROVIDER": "anthropic", "ANTHROPIC_API_KEY": "k"}, LLMModeAnthropic},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, err := LoadLLM(MapLookup(tt.env))
+			if err != nil {
+				t.Fatalf("LoadLLM: %v", err)
+			}
+			if c.Mode != tt.want {
+				t.Errorf("Mode = %q, want %q", c.Mode, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadLLMDefaultsAndOverrides(t *testing.T) {
+	c, err := LoadLLM(MapLookup(map[string]string{"ANTHROPIC_API_KEY": " k \n"}))
+	if err != nil {
+		t.Fatalf("LoadLLM: %v", err)
+	}
+	if c.Model != "claude-sonnet-5-5" || c.RequestTimeout != 60*time.Second || c.MaxRetries != 2 || c.APIKey != "k" {
+		t.Errorf("defaults = %+v", c)
+	}
+
+	c, err = LoadLLM(MapLookup(map[string]string{
+		"LLM_MODEL": "claude-opus-5-5", "LLM_TIMEOUT": "20s", "LLM_MAX_RETRIES": "0",
+	}))
+	if err != nil {
+		t.Fatalf("LoadLLM: %v", err)
+	}
+	if c.Model != "claude-opus-5-5" || c.RequestTimeout != 20*time.Second || c.MaxRetries != 0 {
+		t.Errorf("overrides = %+v", c)
+	}
+}
+
+func TestLoadLLMErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     map[string]string
+		wantErr []string
+	}{
+		{
+			name:    "anthropic without key fails at startup",
+			env:     map[string]string{"LLM_PROVIDER": "anthropic"},
+			wantErr: []string{"LLM_PROVIDER=anthropic needs ANTHROPIC_API_KEY"},
+		},
+		{
+			name:    "all bad values reported together",
+			env:     map[string]string{"LLM_PROVIDER": "openai", "LLM_TIMEOUT": "soon", "LLM_MAX_RETRIES": "99"},
+			wantErr: []string{`LLM_PROVIDER: "openai"`, "LLM_TIMEOUT", "LLM_MAX_RETRIES"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadLLM(MapLookup(tt.env))
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not mention %q", err, want)
+				}
+			}
+		})
+	}
+}

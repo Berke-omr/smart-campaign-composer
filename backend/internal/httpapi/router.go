@@ -10,7 +10,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/campaign"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpx"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/mock"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/segment"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/users"
 )
@@ -22,8 +24,20 @@ type Deps struct {
 	UserStats UserStatsReader
 	Segments  *segment.Registry
 	Audience  AudienceCounter
+	LLM       LLMInfo
+	// Examples are the brief library: the mock catalog's example briefs.
+	Examples []mock.Example
+	// Campaigns runs the draft flow; nil disables the campaign routes.
+	Campaigns *campaign.Service
 	// Now is the clock used to anchor relative-time rules; nil means time.Now.
 	Now func() time.Time
+}
+
+// LLMInfo tells the UI which LLM is active, so it can show a demo badge when
+// the mock answers (DECISIONS.md D12).
+type LLMInfo struct {
+	Mode  string  `json:"mode"`  // "anthropic" or "mock"
+	Model *string `json:"model"` // null for the mock
 }
 
 type UserStatsReader interface {
@@ -59,8 +73,26 @@ func NewRouter(d Deps) http.Handler {
 			}
 			httpx.WriteJSON(w, http.StatusOK, stats)
 		})
+		r.Get("/config", func(w http.ResponseWriter, _ *http.Request) {
+			httpx.WriteJSON(w, http.StatusOK, map[string]LLMInfo{"llm": d.LLM})
+		})
+		r.Get("/briefs/examples", func(w http.ResponseWriter, _ *http.Request) {
+			examples := d.Examples
+			if examples == nil {
+				examples = []mock.Example{}
+			}
+			httpx.WriteJSON(w, http.StatusOK, map[string][]mock.Example{"examples": examples})
+		})
 		r.Get("/segments/fields", d.segmentFields)
 		r.Post("/segments/preview", d.segmentPreview)
+
+		if d.Campaigns != nil {
+			r.Post("/campaigns", d.createCampaign)
+			r.Get("/campaigns", d.listCampaigns)
+			r.Get("/campaigns/{id}", d.getCampaign)
+			r.Get("/campaigns/{id}/draft/stream", d.streamDrafts)
+			r.Put("/campaigns/{id}/messages/{channel}", d.editMessage)
+		}
 	})
 
 	return r

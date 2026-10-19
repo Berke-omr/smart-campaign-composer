@@ -18,8 +18,9 @@ var enumLabels = map[string]map[string]string{
 	"language": {"tr": "Turkish", "en": "English"},
 }
 
-// Describe renders a validated rule, e.g.
-// "City is İstanbul", "Last purchase: not within the last 30 days (or never)".
+// Describe renders a validated rule, e.g. "City is İstanbul",
+// "Added to cart in the last 30 days", "No purchase in the last 30 days".
+// The wording follows the design (DECISIONS.md D22).
 func Describe(v Validated) Description {
 	if len(v.conditions) == 0 {
 		return Description{Summary: "All users", Lines: []string{}}
@@ -34,8 +35,36 @@ func Describe(v Validated) Description {
 	return d
 }
 
+// timePhrases words the relative-time operators per field. "%s" is the day
+// count ("30 days"). "No purchase in the last 30 days" also covers people who
+// never purchased, which is exactly the operator's NULL semantics (D9).
+var timePhrases = map[string]map[Op]string{
+	"last_cart_add_at": {
+		OpWithinLastDays:    "Added to cart in the last %s",
+		OpNotWithinLastDays: "Nothing added to cart in the last %s",
+		OpIsNull:            "Never added to cart",
+		OpIsNotNull:         "Has added to cart",
+	},
+	"last_purchase_at": {
+		OpWithinLastDays:    "Purchased in the last %s",
+		OpNotWithinLastDays: "No purchase in the last %s",
+		OpIsNull:            "Never purchased",
+		OpIsNotNull:         "Has purchased",
+	},
+	"created_at": {
+		OpWithinLastDays:    "Signed up in the last %s",
+		OpNotWithinLastDays: "Signed up more than %s ago",
+	},
+}
+
 func describe(c validCondition) string {
 	f := c.field
+	if phrase, ok := timePhrases[f.Name][c.op]; ok {
+		if strings.Contains(phrase, "%s") {
+			return fmt.Sprintf(phrase, daysText(c.days))
+		}
+		return phrase
+	}
 	switch c.op {
 	case OpEq:
 		return fmt.Sprintf("%s is %s", f.Label, scalarText(c))

@@ -1,0 +1,14 @@
+Write the email for this campaign.
+
+<brief>
+Son 30 günde sepetine ürün ekleyip alışveriş yapmayan İstanbul'daki kullanıcılara %30 indirim hatırlatması gönder. Samimi ama kısa olsun.
+</brief>
+
+Tone: friendly
+Campaign: Cart reminder — İstanbul
+Audience: City is İstanbul; Added to cart in the last 30 days; No purchase in the last 30 days
+
+Characters each variable takes (the longest value among this audience):
+- {{first_name}}: 13 ("Muhammed Emin")
+- {{last_name}}: 13 ("Hacıosmanoğlu")
+- {{city}}: 8 ("İstanbul")

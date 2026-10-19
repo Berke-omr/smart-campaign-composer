@@ -1,0 +1,15 @@
+{
+  "id": "weekend-sale-email",
+  "example": true,
+  "title": "Weekend sale — all subscribers",
+  "brief": "Tüm email abonelerine hafta sonuna özel %20 indirim duyurusu yap. Resmi bir dil kullan.",
+  "channels": ["email"],
+  "tone": "professional",
+  "segment": [
+    {"answer": {"campaign_name": "Weekend sale — all subscribers", "rule": {"match": "all", "conditions": []}, "unsupported_criteria": []}}
+  ],
+  "email": [
+    {"answer": {"subject": "Hafta sonuna özel %20 indirim", "body": "Sayın {{first_name}} {{last_name}},\n\nHafta sonu boyunca tüm ürünlerde %20 indirim sizleri bekliyor.\n\nBu fırsatı kaçırmamanızı dileriz.\n\nSaygılarımızla,\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "email": "valid@1"}
+}

@@ -18,8 +18,8 @@
 | P0 | Plan & docs | ✅ done | 2026-10-19 |
 | P1 | Skeleton & infrastructure | ✅ done (PR, branch `feat/p1-skeleton`) | 2026-10-19 |
 | P2 | Segment DSL & audience | ✅ done (PR, branch `feat/p2-segment-dsl`) | 2026-10-19 |
-| P3 | LLM layer | ⏳ next | — |
-| P4 | Approval & delivery pipeline | ⬜ | — |
+| P3 | LLM layer | ✅ done (PR, branch `feat/p3-llm`) | 2026-10-19 |
+| P4 | Approval & delivery pipeline | ⏳ next | — |
 | P5 | Tracking (SSE, metrics, health) | ⬜ | — |
 | P6 | Frontend | ⬜ | — |
 | P7 | Hardening & submission | ⬜ | — |
@@ -103,19 +103,28 @@ IDs are referenced from tests and commits so reviewers can see which requirement
 ### P3 — LLM layer
 - **Goal:** brief → validated segment rule + validated SMS/email drafts, with or without an API key.
 - **Deliverables:**
-  - `internal/llm`: `Client` interface; `anthropic` implementation (structured outputs); `mock` implementation driven by a scenario catalog (`testdata/llm-scenarios/`: happy-path and fault scenarios, streaming).
+  - `internal/llm`: `Client` interface; `anthropic` implementation (structured outputs); `mock` implementation driven by a scenario catalog (`internal/llm/mock/scenarios/`, embedded: happy-path and fault scenarios, streaming).
   - Prompts + JSON schemas for segment and content; two-layer validation (schema shape, then business rules).
   - Repair loop: on validation failure, re-ask with the concrete errors (max 2 retries), then surface errors.
   - `internal/content`: variable whitelist, length rules (rune-based), worst-case length check, renderer.
-  - Campaign draft endpoints + SSE stream for content generation (`draft.delta`, `draft.validated`, `draft.invalid`, `draft.repairing`).
-  - Provider selection: `LLM_PROVIDER=auto|anthropic|mock`.
+  - Campaign draft endpoints + SSE stream for content generation (`draft.state` with the design's states, `draft.delta`, `draft.error`, `draft.done`; DECISIONS.md D23).
+  - Provider selection: `LLM_PROVIDER=auto|anthropic|mock`, model via `LLM_MODEL` (default Claude Sonnet 5.5, `claude-sonnet-5-5`, D13). The SDK client is built from explicit options.
+  - **Design-driven additions (DECISIONS.md D22):**
+    - Generate request: brief + selected channels + tone. The model also returns a short campaign name.
+    - Per-channel draft states `writing → validating → fixing (attempt n of 3) → valid / needs_manual_edit`. SMS is validated as soon as its JSON is complete, while email may still stream.
+    - Preview response adds per-channel consent exclusions and total channel messages (e.g. 99 + 133 = 232).
+    - Preview rendering for a fictional sample user, plus a worst-case rendering with the audience's longest values. The API returns those longest values and the computed lengths (D15).
+    - `GET /api/briefs/examples`: briefs of the happy-path mock scenarios.
+    - The API reports the LLM mode (mock / anthropic).
+    - Campaign statuses Draft, Ready, Sending, Completed, Failed. `segment.Describe` uses the design's wording.
+  - `docs/API.md`: REST and SSE contract (endpoints, event types, states). It is the input for P6.
 - **Done when:**
   - With the mock: sample brief → valid DSL → count → streamed, validated SMS + email.
   - Every fault scenario (broken JSON, unknown field, 200-char SMS, unknown variable, refusal, timeout) produces the expected repair-then-error behaviour — one test per scenario.
   - The real-key path is treated as the primary demo: prompts and error handling polished as if evaluators run with a key.
-  - Manual smoke test with a real key; the real responses are saved as fixtures under `testdata/` and replayed in tests.
-  - Go SDK binding for `output_config.format` verified against the SDK source (fallback: strict tool use).
-- **Estimate:** 8 h. **Covers:** R1, R5 (API), R6, R7, R16, R17, U1.
+  - Smoke test on the real Anthropic API with Sonnet 5.5 (the number of calls agreed in advance). The responses are saved as fixtures under `testdata/` and replayed in tests.
+  - Go SDK binding for `output_config.format` verified against the SDK source, and the 12-variant schema accepted by the real API. Fallbacks: strict tool use / a generic condition schema.
+- **Estimate:** 9 h (+1 h for the design-driven additions). **Covers:** R1, R5 (API), R6, R7, R16, R17, U1.
 
 ### P4 — Approval & delivery pipeline
 - **Goal:** reliable, rate-limited, exactly-once-effect sending.
@@ -126,6 +135,8 @@ IDs are referenced from tests and commits so reviewers can see which requirement
   - Retry policy: exponential backoff with full jitter for 5xx/timeouts/network errors; honour `Retry-After` on 429; permanent failure on other 4xx; max attempts → `failed`.
   - `Idempotency-Key: <delivery id>` on every provider call.
   - Mock provider: configurable latency, 5xx rate, 429 rate and its own rate limit via env; idempotency-key dedup.
+  - `delivery_attempts` log: one row per provider call (HTTP status, error, `retry_after`, timestamp). It feeds the dashboard's "Recent issues" (D22).
+  - Message states Queued, Sending, Sent, Retrying, Failed.
 - **Done when (integration tests against real Postgres):**
   - Approving twice creates one set of deliveries.
   - Provider accepts but the response times out → retry → provider records exactly one message.
@@ -136,8 +147,11 @@ IDs are referenced from tests and commits so reviewers can see which requirement
 
 ### P5 — Tracking
 - **Goal:** observable sending.
-- **Deliverables:** `GET /api/campaigns/{id}/events` (SSE, periodic aggregate snapshots), `/metrics` (Prometheus), `/healthz` (liveness) + `/readyz` (DB ping).
-- **Done when:** `curl -N` shows snapshots changing during a send; counters on `/metrics` increase; `/readyz` fails when Postgres is stopped.
+- **Deliverables:**
+  - `GET /api/campaigns/{id}/events` (SSE, periodic aggregate snapshots).
+  - Snapshots also carry per-channel sends per second for the last 30 s (for the speed chart against the 100/s line) and the latest issues from `delivery_attempts` (D22).
+  - `/metrics` (Prometheus), `/healthz` (liveness) + `/readyz` (DB ping).
+- **Done when:** `curl -N` shows snapshots changing during a send, and no per-second value exceeds 100 per channel. Counters on `/metrics` increase. `/readyz` fails when Postgres is stopped.
 - **Estimate:** 3 h. **Covers:** R13 (API), R14, R15.
 
 ### P6 — Frontend
@@ -146,8 +160,9 @@ IDs are referenced from tests and commits so reviewers can see which requirement
   - Composer: brief input → segment card (rule as readable chips, explanation, counts per channel, unsupported-criteria warnings) → streamed drafts → live character counters, variable highlighting, preview rendered for a sample user → edit → approve dialog with final counts.
   - Campaign dashboard: per-channel progress, status counts, throughput, recent errors.
   - Campaign list. "Mock LLM" badge when running without a key.
+  - **Visual reference:** `DESIGN.md` + `design/screens/`, visual only (D22). Glass theme tokens in one theme file. Fonts self-hosted via npm, so there is no runtime dependency on Google Fonts. Revisit D17: own small components may fit the glass style better than a themed UI library.
 - **Done when:** full flow works in the browser with the mock LLM; edited content is re-validated by the backend (an over-limit edit is rejected); a few Vitest component tests pass.
-- **Estimate:** 10 h. **Covers:** R3, R5, R8, R13 (UI).
+- **Estimate:** 10–12 h (design-heavy). **Covers:** R3, R5, R8, R13 (UI).
 
 ### P7 — Hardening & submission
 - **Deliverables:** README (setup, architecture diagram, known gaps), final DECISIONS.md, e2e smoke script, secret scan, `ai-sessions/` exports + index.
@@ -178,7 +193,7 @@ IDs are referenced from tests and commits so reviewers can see which requirement
 | 7 | Sun 25 Oct | P7 (+ CI bonus if time) |
 | — | Mon 26 Oct | Buffer: final clean-clone check, export sessions, submit |
 
-Core estimate ≈ 44 h. P3 and P4 are the most likely to overrun; the buffer is the bonus time and the morning of 26 Oct.
+Core estimate ≈ 44 h, revised to ≈ 47 h after the design review (P3 +1 h, P6 +2 h; D22). P3, P4 and P6 are the most likely to overrun; the buffer is the bonus time and the morning of 26 Oct.
 
 ## Cut order (if time runs short; first item is cut first)
 
@@ -204,6 +219,8 @@ mock LLM, mock provider with real faults, queue + rate limit + retry + dedup, SS
 | SSE buffered by the frontend proxy | nginx `proxy_buffering off` for SSE routes; verified with `curl -N` |
 | Reviewer machine differences (arm64/amd64, no Go/Node installed) | Multi-arch base images; everything runs in containers, including tests |
 | Secrets/PII leaking into `ai-sessions/` | `.env` git-ignored; secret scan before submit |
+| API spend during development | Smoke tests are few and agreed before each run; afterwards the recorded fixtures are replayed |
+| Design-heavy frontend (glass UI) overruns P6 | Visual reference only (D22); cut order item 7 (dashboard polish) applies first |
 
 ## Target repository layout
 
@@ -212,7 +229,7 @@ smart-campaign-composer/
 ├── README.md · DECISIONS.md · Makefile · .env.example · .gitignore
 ├── docker-compose.yml          # postgres, api, worker, mock-provider, frontend, seed (one-shot)
 ├── docker-compose.test.yml     # make test → tests run in containers against a real postgres
-├── docs/          CASE.md · PLAN.md
+├── docs/          CASE.md · PLAN.md · API.md
 ├── ai-sessions/   README.md (session index) + exports
 ├── backend/                    # single Go module, one Dockerfile, several binaries
 │   ├── cmd/
@@ -225,13 +242,14 @@ smart-campaign-composer/
 │   │   ├── db/                 # pgx pool, migrations runner
 │   │   ├── segment/            # DSL types, field registry, validator, SQL compiler
 │   │   ├── content/            # variables, length rules, validator, renderer
-│   │   ├── llm/                # Client interface, anthropic/, mock/, prompts, schemas, repair loop
+│   │   ├── llm/                # Client interface, prompts, schemas, parsing, generator (repair loop)
+│   │   │   ├── anthropic/      # Claude client; testdata/recorded = real API responses
+│   │   │   └── mock/           # mock LLM; scenarios/*.json embedded (not testdata: Go skips it)
 │   │   ├── campaign/           # state machine, service, repository
 │   │   ├── delivery/           # queue claim, rate limiter, retry policy, provider client
 │   │   ├── httpapi/            # handlers, SSE, middleware
 │   │   └── metrics/
-│   ├── migrations/
-│   └── testdata/               # LLM fixtures (recorded real responses + faulty cases)
+│   └── migrations/
 ├── frontend/                   # Vue 3 + Vite + TS, served by nginx
 │   └── src/ api/ · views/ (Composer, CampaignDashboard, Campaigns) · components/
 └── .github/workflows/ci.yml    # bonus
@@ -338,4 +356,116 @@ api log                                             -> "segment registry ready",
 integration tests against Postgres in the container.
 
 ### P3
-_pending_
+
+**Real API (Claude Sonnet 5.5, Go SDK v1.82.0), 11 paid calls in total (≤ $0.07):**
+- *SDK binding (D8):* `OutputConfigParam{Effort, Format: JSONOutputFormatParam{Schema}}` exists in the SDK
+  source, so Structured Outputs is used directly. `option.WithoutEnvironmentDefaults()` stops the SDK from
+  reading base URLs, tokens or profiles from the environment (D12).
+- *Smoke test A* (`go test -tags live`, 8 calls, responses recorded under
+  `internal/llm/anthropic/testdata/recorded/`). The 12-variant segment schema is accepted by the real API.
+
+  | Call | Effort | Total | First text | Input / cache read / cache write / output | Result |
+  |---|---|---|---|---|---|
+  | segment, sample brief | low | 3.76 s | – | 102 / 0 / 4,413 / 133 | 3 conditions, "Cart reminder — İstanbul" |
+  | segment, sample brief | medium | – | – | 102 / 4,413 / 0 / 3,636 (3,532 thinking) | **declined** (`reasoning_extraction`) after part of the JSON |
+  | segment, İstanbul or Ankara, 90 days | low | 2.04 s | – | 90 / 4,413 / 0 / 107 | `city in [...]` + no purchase in 90 days |
+  | segment, "kadın kullanıcılar" | low | 1.75 s | – | 71 / 4,413 / 0 / 95 | cart in 60 days; unsupported: "kadın kullanıcılar (cinsiyet)" |
+  | SMS | low | 2.45 s | 1.84 s | 256 / 0 / 540 / 69 | worst case 116 / 160 |
+  | email | low | 11.43 s | 9.88 s | 254 / 0 / 622 / 182 | subject 49 / 80 |
+  | SMS | medium | 1.69 s | 1.28 s | 256 / 540 / 0 / 70 | worst case 105 / 160 |
+  | email | medium | 10.00 s | 8.83 s | 254 / 622 / 0 / 174 | subject 56 / 80 |
+
+  Outcome: effort `low` for every task (medium was no better and produced the only refusal); a refusal is
+  retried once (D23); a prompt rule forbids suffixes on variables after the email wrote `{{city}}'daki`
+  (wrong for İzmir). The prompt cache works for both the segment prefix (4,413 tokens) and the content prefixes.
+- *Smoke test B* (the app itself in anthropic mode, 3 calls): `POST /api/campaigns` 2.81 s with the design's
+  three audience lines; SMS first text 2.48 s, valid at 2.73 s (worst case 124 / 160); email first text
+  1.60 s, valid at 3.17 s (subject 56 / 80). The email used "`{{city}} için`", so the suffix rule worked. The
+  ~9 s email delay from smoke test A did not recur. Reopening the stream replayed the stored drafts with no
+  model call.
+
+**Validation and repair (mock LLM, all in `make test`):**
+- *One test per fault scenario*, each pinned to the exact state sequence the UI shows (`TestFaultScenarios`):
+  broken JSON → `writing1 validating1 fixing2 validating2 valid2`; 200-character SMS → three attempts then
+  `needs_manual_edit3`; unknown variable → repaired on attempt 2; refusal → declined twice is final
+  (`writing1 fixing2 needs_manual_edit2`), declined once recovers; timeout → `fixing2 fixing3
+  needs_manual_edit3`; unknown field (segment) → repaired on attempt 2, with the validator's message quoted
+  in the repair prompt.
+- *Scenario catalog consistency:* every scenario declares its outcome (`valid@N` / `needs_manual_edit`), and
+  a test recomputes it from the scripted answers with the real validators and the attempt budget.
+- *Recorded Claude answers* are replayed through the real SDK and the whole generator (segment valid on
+  attempt 1; SMS `writing → validating → valid`; a real refusal is a typed error even after partial JSON).
+- *Content rules:* 160 `ş` (320 bytes) valid / 161 rejected; worst case uses the longest values of the
+  channel's recipients ("Muhammed Emin", "Montgomery-Fitzgerald"); a property test renders every accepted
+  template for random recipients and never exceeds 160; Postgres `char_length` equals Go's rune count on
+  the whole seed; `FuzzValidate` (361,258 execs) and `FuzzPartialStrings` (2,396,842 execs) found nothing.
+- *Streaming:* for every prefix of 300 random answers the decoded field values are prefixes of the final
+  values; SMS reaches `valid` while the email is still streaming; a disconnect stops the work and stores
+  nothing.
+
+**Mutation checks.** Each change was made and had to compile, the named tests failed, and the change
+was reverted with `git status` clean afterwards. A mutant that does not compile proves nothing; its build
+error must not be mistaken for a test result.
+
+| Mutation | Caught by |
+|---|---|
+| `auto` ignores the key | `TestLoadLLMProviderSelection` |
+| `maxLength` in the SMS schema | schema subset test |
+| strict decoding removed | 3 parse tests |
+| refusal treated as `end_turn` | 2 stop-reason tests + the recorded refusal |
+| rune count → `len()` | 3 content tests |
+| worst case → raw template length | 3 content tests (see the note below) |
+| channel filter dropped from the longest-value query | oracle comparison (13 vs 11 characters) |
+| example SMS lengthened past 160 | catalog consistency test |
+| `MaxAttempts` 3 → 2 | 4 generator tests |
+| over-long text silently cut to 160 | `TestNeverSilentlyTruncates` + fault test |
+| first refusal final | 2 generator tests |
+| campaign status always `ready` | 2 campaign tests |
+
+*Note on the worst-case mutation:* the first attempt replaced `RuneCountInString(rendered)` with
+`RuneCountInString(f.value)`, which left `rendered` unused, so the mutant did not compile
+(`declared and not used: rendered`). The test output had been filtered to `--- FAIL` lines, which hid the
+`[build failed]` line, and the following `ok (cached)` belonged to the run after the revert. At the time
+this was misreported as "the change did not apply". Reproduced on 2026-10-19 with unfiltered output; the
+mutation that compiles (`RuneCountInString(f.value) + 0*len(rendered)`) is caught by the 3 tests above.
+
+**Live stack** (through nginx, mock mode unless noted):
+```
+GET  /api/config                    -> {"llm":{"mode":"mock","model":null}}  (anthropic mode: model claude-sonnet-5-5)
+LLM_PROVIDER=anthropic, no key      -> api exits: "LLM_PROVIDER=anthropic needs ANTHROPIC_API_KEY"
+POST /api/segments/preview          -> 175 people, SMS 98 (77 excluded), email 132 (43 excluded), 230 messages
+GET  /api/briefs/examples           -> 5 examples
+POST /api/campaigns (sample brief)  -> 201 "Cart reminder — İstanbul", draft, in 0.44 s
+GET  .../draft/stream (curl -N)     -> 66 events over 1.75 s; SMS valid at 0.99 s while the email streamed; draft.done ready
+PUT  .../messages/sms (161 chars)   -> 422 with the report
+```
+Live counts are 175, not 177: the seed's timestamps are fixed at seed time while "the last 30 days" moves
+with the clock. Tests pin `asOf` and still get 177 / 99 / 133.
+
+**Test suite:** `make test` exit 0 (13 Go packages with `-race` against Postgres, Vitest 3 passed).
+
+**Follow-up after review (2026-10-19):**
+- *Email first-token delay* (~9 s in smoke test A): measured by phase with `go test -tags live -run
+  '^TestEmailLatency$'` (4 calls, ≤ $0.016). Response headers, `message_start`, the text block and the first
+  text delta arrive together, with no thinking block (0 thinking tokens):
+
+  | Call | Headers = first text | End | Note |
+  |---|---|---|---|
+  | email #1 | 1.93 s | 3.64 s | prompt cache written |
+  | email #2 | 1.16 s | 3.05 s | cache read |
+  | email #3 | 1.15 s | 2.85 s | cache read |
+  | SMS (control) | 3.15 s | 3.62 s | prompt cache written |
+
+  The 9 s delay did not recur in four later samples (smoke test B and #1–#3). The whole wait is before the API
+  sends its response headers, so it is on the API side, not in our streaming code. Closed as transient; the
+  per-attempt timeout (60 s) already covers a slow start, and the card shows "Writing…" meanwhile.
+- *Untested guard:* removing the "do not save after the client left" check passed every test (a save
+  with the dead request fails anyway). `TestClientLeavingStoresNothing` now also requires no `draft.error`
+  and no logged save failure; removing the check fails it 3 of 3 times, and the intact code passes 10 of
+  10 runs with `-race`.
+
+**Deviations from the P3 plan:**
+- SSE event names follow the design's states (`draft.state` + `draft.delta` + `draft.error` + `draft.done`)
+  instead of `draft.validated` / `draft.invalid` / `draft.repairing` (decision K6, D23).
+- The mock scenario catalog lives in `internal/llm/mock/scenarios/` (embedded), not `testdata/` (K5).
+- A refusal is retried once within the 3 attempts, instead of never (decided after smoke test A, D23).

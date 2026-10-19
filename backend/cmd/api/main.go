@@ -12,10 +12,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/campaign"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/config"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/db"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpapi"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpx"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/anthropic"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/mock"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/logging"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/segment"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/users"
@@ -36,7 +40,8 @@ func run() error {
 	common, errCommon := config.LoadCommon(config.OSLookup)
 	httpCfg, errHTTP := config.LoadHTTP(config.OSLookup)
 	dbCfg, errDB := config.LoadDatabase(config.OSLookup)
-	if err := errors.Join(errCommon, errHTTP, errDB); err != nil {
+	llmCfg, errLLM := config.LoadLLM(config.OSLookup)
+	if err := errors.Join(errCommon, errHTTP, errDB, errLLM); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
 	logger := logging.New("api", common.LogLevel)
@@ -61,11 +66,49 @@ func run() error {
 	}
 	logger.Info("segment registry ready", "cities", len(cities))
 
+	llmInfo := httpapi.LLMInfo{Mode: string(llmCfg.Mode)}
+	if llmCfg.Mode == config.LLMModeAnthropic {
+		llmInfo.Model = &llmCfg.Model
+	}
+	logger.Info("llm ready", "mode", llmInfo.Mode, "model", llmCfg.Model)
+
+	// The scenario catalog drives the mock LLM and provides the brief
+	// library in both modes. A broken catalog stops the api here.
+	catalog, err := mock.LoadCatalog()
+	if err != nil {
+		return fmt.Errorf("mock scenario catalog: %w", err)
+	}
+
+	registry := segment.NewRegistry(cities)
+	counter := segment.NewCounter(pool)
+	var client llm.Client
+	if llmCfg.Mode == config.LLMModeAnthropic {
+		client = anthropic.New(anthropic.Config{
+			APIKey: llmCfg.APIKey, Model: llmCfg.Model,
+			RequestTimeout: llmCfg.RequestTimeout, MaxRetries: llmCfg.MaxRetries,
+		})
+	} else {
+		client = mock.New(catalog, mock.DemoOptions(cities))
+	}
+	campaigns := &campaign.Service{
+		Repo:      campaign.NewRepository(pool),
+		Generator: &llm.Generator{Client: client, AttemptTimeout: llmCfg.RequestTimeout},
+		Registry:  registry,
+		Audience:  counter,
+		LLMMode:   llmInfo.Mode,
+		LLMModel:  llmInfo.Model,
+		Logger:    logger,
+		Now:       time.Now,
+	}
+
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Logger:    logger,
 		UserStats: userRepo,
-		Segments:  segment.NewRegistry(cities),
-		Audience:  segment.NewCounter(pool),
+		Segments:  registry,
+		Audience:  counter,
+		LLM:       llmInfo,
+		Examples:  catalog.Examples(),
+		Campaigns: campaigns,
 	})
 	srv := &http.Server{
 		Addr:              httpCfg.Addr,

@@ -1,0 +1,15 @@
+{
+  "id": "fault-unknown-field",
+  "brief": "[test] The first rule uses a field that does not exist; the repair lists it as unsupported.",
+  "channels": ["sms"],
+  "tone": "friendly",
+  "segment": [
+    {"answer": {"campaign_name": "Fault test — İstanbul", "rule": {"match": "all", "conditions": [
+      {"field": "city", "op": "eq", "value": "İstanbul"},
+      {"field": "gender", "op": "eq", "value": "female"}]}, "unsupported_criteria": []}},
+    {"answer": {"campaign_name": "Fault test — İstanbul", "rule": {"match": "all", "conditions": [
+      {"field": "city", "op": "eq", "value": "İstanbul"}]}, "unsupported_criteria": ["kadın kullanıcılar"]}}
+  ],
+  "sms": [{"answer": {"text": "Merhaba {{first_name}}, sepetindeki ürünler seni bekliyor!"}}],
+  "expect": {"segment": "valid@2", "sms": "valid@1"}
+}

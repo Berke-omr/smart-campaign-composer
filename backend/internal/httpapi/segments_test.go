@@ -59,8 +59,14 @@ func TestSegmentPreview(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Audience != c.audience {
-		t.Errorf("audience = %+v", got.Audience)
+	want := segment.Reach{Audience: c.audience, SMSExcluded: 78, EmailExcluded: 44, ChannelMessages: 232}
+	if got.Audience != want {
+		t.Errorf("audience = %+v, want %+v", got.Audience, want)
+	}
+	for _, key := range []string{`"total":177`, `"sms_reachable":99`, `"sms_excluded":78`, `"email_excluded":44`, `"channel_messages":232`} {
+		if !strings.Contains(rec.Body.String(), key) {
+			t.Errorf("body lacks %s: %s", key, rec.Body)
+		}
 	}
 	if len(got.Description.Lines) != 2 || got.Description.Lines[0] != "City is İstanbul" {
 		t.Errorf("description = %+v", got.Description)
