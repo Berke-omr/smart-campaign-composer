@@ -13,9 +13,11 @@ import (
 	"time"
 
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/config"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/db"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpapi"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpx"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/logging"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/users"
 )
 
 func main() {
@@ -32,14 +34,25 @@ func run() error {
 
 	common, errCommon := config.LoadCommon(config.OSLookup)
 	httpCfg, errHTTP := config.LoadHTTP(config.OSLookup)
-	if err := errors.Join(errCommon, errHTTP); err != nil {
+	dbCfg, errDB := config.LoadDatabase(config.OSLookup)
+	if err := errors.Join(errCommon, errHTTP, errDB); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
 	logger := logging.New("api", common.LogLevel)
 
+	pool, err := db.Connect(ctx, dbCfg, logger)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	handler := httpapi.NewRouter(httpapi.Deps{
+		Logger:    logger,
+		UserStats: users.NewRepository(pool),
+	})
 	srv := &http.Server{
 		Addr:              httpCfg.Addr,
-		Handler:           httpapi.NewRouter(httpapi.Deps{Logger: logger}),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		// No WriteTimeout on purpose: SSE responses (live drafts, dashboard)
 		// stay open for minutes.
