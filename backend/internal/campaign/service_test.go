@@ -356,7 +356,7 @@ func TestLockedOnceSending(t *testing.T) {
 	f := setup(t, mock.Options{})
 	ctx := context.Background()
 	v, _ := f.svc.Create(ctx, f.brief(t, "cart-reminder-istanbul"))
-	if _, err := f.pool.Exec(ctx, `UPDATE campaigns SET status = 'sending' WHERE id = $1`, v.ID); err != nil {
+	if _, err := f.pool.Exec(ctx, `UPDATE campaigns SET status = 'sending', approved_at = now() WHERE id = $1`, v.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.svc.StreamDrafts(ctx, v.ID, func(string, any) error { return nil }); !errors.Is(err, ErrLocked) {

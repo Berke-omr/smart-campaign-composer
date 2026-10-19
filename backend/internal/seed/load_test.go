@@ -33,16 +33,33 @@ func TestLoadIsIdempotentAndResettable(t *testing.T) {
 		t.Fatalf("second load = %+v, want skipped", res)
 	}
 
+	// A campaign whose deliveries point at user 1: the reset must not be
+	// blocked by them, and must not leave them pointing at a new user 1.
+	if _, err := pool.Exec(ctx, `
+		WITH c AS (
+			INSERT INTO campaigns (name, brief, tone, channels, segment_rule, audience_as_of, llm_mode)
+			VALUES ('n', 'b', 'friendly', ARRAY['sms'], '{}', now(), 'mock') RETURNING id)
+		INSERT INTO deliveries (campaign_id, user_id, channel, recipient, text)
+		SELECT c.id, 1, 'sms', '+905321234567', 'Merhaba' FROM c`); err != nil {
+		t.Fatal(err)
+	}
+
 	res, err = seed.Load(ctx, pool, users, true)
 	if err != nil {
 		t.Fatalf("reset load: %v", err)
 	}
-	var n, minID, maxID int64
+	var n, minID, maxID, campaigns, deliveries int64
 	if err := pool.QueryRow(ctx, "SELECT count(*), min(id), max(id) FROM users").Scan(&n, &minID, &maxID); err != nil {
 		t.Fatal(err)
 	}
 	if res.Inserted != 2000 || n != 2000 || minID != 1 || maxID != 2000 {
 		t.Fatalf("after reset: inserted=%d count=%d ids=[%d,%d], want 2000 rows with ids 1..2000", res.Inserted, n, minID, maxID)
+	}
+	if err := pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM campaigns), (SELECT count(*) FROM deliveries)").Scan(&campaigns, &deliveries); err != nil {
+		t.Fatal(err)
+	}
+	if campaigns != 0 || deliveries != 0 {
+		t.Fatalf("after reset: %d campaigns, %d deliveries; want none", campaigns, deliveries)
 	}
 }
 

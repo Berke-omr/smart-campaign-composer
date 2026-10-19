@@ -39,7 +39,7 @@ test-frontend: ## Vitest component tests
 		$(COMPOSE_TEST) down -v --remove-orphans >/dev/null 2>&1; \
 		exit $$status
 
-reseed: ## Delete all users and seed again
+reseed: ## Delete all users and campaigns, then seed again
 	docker compose run --rm seed /app/seed -reset
 
 psql: ## Open a SQL shell in the database

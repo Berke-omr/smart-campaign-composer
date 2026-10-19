@@ -1,7 +1,7 @@
 // Command seed fills the users table with deterministic fake profiles.
 //
 // It is idempotent: when users already exist it does nothing. Pass -reset to
-// empty the table and seed again (`make reseed`).
+// delete every user and campaign and seed again (`make reseed`).
 package main
 
 import (
@@ -22,7 +22,7 @@ import (
 )
 
 func main() {
-	reset := flag.Bool("reset", false, "delete existing users and seed again")
+	reset := flag.Bool("reset", false, "delete existing users and campaigns, then seed again")
 	flag.Parse()
 
 	if err := run(*reset); err != nil {

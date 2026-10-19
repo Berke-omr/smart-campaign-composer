@@ -23,9 +23,10 @@ var columns = []string{
 }
 
 // Load writes users with a single COPY. It is idempotent: if the table already
-// has rows it does nothing, unless reset is true, in which case the table is
-// emptied first (ids restart at 1, so a reset gives the same ids as a fresh
-// install).
+// has rows it does nothing, unless reset is true, in which case users and
+// campaigns are emptied first (ids restart at 1, so a reset gives the same ids
+// as a fresh install). Campaigns go too: their deliveries point at users, and
+// a frozen audience of people who no longer exist means nothing.
 func Load(ctx context.Context, pool *pgxpool.Pool, users []User, reset bool) (Result, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -40,8 +41,8 @@ func Load(ctx context.Context, pool *pgxpool.Pool, users []User, reset bool) (Re
 	}
 
 	if reset {
-		if _, err := tx.Exec(ctx, "TRUNCATE users RESTART IDENTITY"); err != nil {
-			return Result{}, fmt.Errorf("truncate users: %w", err)
+		if _, err := tx.Exec(ctx, "TRUNCATE users, campaigns RESTART IDENTITY CASCADE"); err != nil {
+			return Result{}, fmt.Errorf("truncate users and campaigns: %w", err)
 		}
 	} else {
 		var exists bool
