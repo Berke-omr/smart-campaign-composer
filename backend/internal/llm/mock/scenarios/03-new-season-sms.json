@@ -1,0 +1,16 @@
+{
+  "id": "new-season-sms",
+  "example": true,
+  "title": "New season — cart adders",
+  "brief": "Son 60 günde sepete ürün ekleyen kadın kullanıcılara yeni sezon ürünlerini SMS ile duyur.",
+  "channels": ["sms"],
+  "tone": "playful",
+  "segment": [
+    {"answer": {"campaign_name": "New season — cart adders", "rule": {"match": "all", "conditions": [
+      {"field": "last_cart_add_at", "op": "within_last_days", "value": 60}]}, "unsupported_criteria": ["kadın kullanıcılar"]}}
+  ],
+  "sms": [
+    {"answer": {"text": "Yeni sezon geldi {{first_name}}! Sepetine eklediklerinle uyumlu yeni ürünler seni bekliyor, hemen keşfet."}}
+  ],
+  "expect": {"segment": "valid@1", "sms": "valid@1"}
+}

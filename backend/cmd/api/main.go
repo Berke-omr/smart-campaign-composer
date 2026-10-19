@@ -16,6 +16,7 @@ import (
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/db"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpapi"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpx"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/mock"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/logging"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/segment"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/users"
@@ -68,12 +69,20 @@ func run() error {
 	}
 	logger.Info("llm ready", "mode", llmInfo.Mode, "model", llmCfg.Model)
 
+	// The scenario catalog drives the mock LLM and provides the brief
+	// library in both modes. A broken catalog stops the api here.
+	catalog, err := mock.LoadCatalog()
+	if err != nil {
+		return fmt.Errorf("mock scenario catalog: %w", err)
+	}
+
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Logger:    logger,
 		UserStats: userRepo,
 		Segments:  segment.NewRegistry(cities),
 		Audience:  segment.NewCounter(pool),
 		LLM:       llmInfo,
+		Examples:  catalog.Examples(),
 	})
 	srv := &http.Server{
 		Addr:              httpCfg.Addr,

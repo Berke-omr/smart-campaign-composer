@@ -2,12 +2,14 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/mock"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/logging"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/users"
 )
@@ -99,5 +101,27 @@ func TestConfigReportsLLMMode(t *testing.T) {
 				t.Errorf("body = %q, want %q", body, tt.want)
 			}
 		})
+	}
+}
+
+func TestBriefExamples(t *testing.T) {
+	rec := serve(t, Deps{}, http.MethodGet, "/api/briefs/examples")
+	if rec.Code != http.StatusOK || rec.Body.String() != "{\"examples\":[]}\n" {
+		t.Fatalf("no examples: status %d body %q", rec.Code, rec.Body)
+	}
+
+	cat, err := mock.LoadCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = serve(t, Deps{Examples: cat.Examples()}, http.MethodGet, "/api/briefs/examples")
+	var got struct {
+		Examples []mock.Example `json:"examples"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Examples) != 5 || got.Examples[0].Title != "Cart reminder — İstanbul" || got.Examples[0].Tone != "friendly" {
+		t.Errorf("examples = %+v", got.Examples)
 	}
 }

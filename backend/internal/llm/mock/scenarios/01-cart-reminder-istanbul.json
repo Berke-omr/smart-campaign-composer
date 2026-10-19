@@ -1,0 +1,21 @@
+{
+  "id": "cart-reminder-istanbul",
+  "example": true,
+  "title": "Cart reminder — İstanbul",
+  "brief": "Son 30 günde sepetine ürün ekleyip alışveriş yapmayan İstanbul'daki kullanıcılara %30 indirim hatırlatması gönder. Samimi ama kısa olsun.",
+  "channels": ["sms", "email"],
+  "tone": "friendly",
+  "segment": [
+    {"answer": {"campaign_name": "Cart reminder — İstanbul", "rule": {"match": "all", "conditions": [
+      {"field": "city", "op": "eq", "value": "İstanbul"},
+      {"field": "last_cart_add_at", "op": "within_last_days", "value": 30},
+      {"field": "last_purchase_at", "op": "not_within_last_days", "value": 30}]}, "unsupported_criteria": []}}
+  ],
+  "sms": [
+    {"answer": {"text": "Merhaba {{first_name}}, sepetindeki ürünler seni bekliyor! Bugüne özel %30 indirimle alışverişini tamamla."}}
+  ],
+  "email": [
+    {"answer": {"subject": "{{first_name}}, sepetindekilere %30 indirim seni bekliyor", "body": "Merhaba {{first_name}},\n\nSepetine eklediğin ürünler hâlâ seni bekliyor.\n\nBugüne özel %30 indirimle alışverişini şimdi tamamlayabilirsin.\n\nKeyifli alışverişler,\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "sms": "valid@1", "email": "valid@1"}
+}

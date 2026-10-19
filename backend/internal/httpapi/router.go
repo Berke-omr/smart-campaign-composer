@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpx"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/mock"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/segment"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/users"
 )
@@ -23,6 +24,8 @@ type Deps struct {
 	Segments  *segment.Registry
 	Audience  AudienceCounter
 	LLM       LLMInfo
+	// Examples are the brief library: the mock catalog's example briefs.
+	Examples []mock.Example
 	// Now is the clock used to anchor relative-time rules; nil means time.Now.
 	Now func() time.Time
 }
@@ -69,6 +72,13 @@ func NewRouter(d Deps) http.Handler {
 		})
 		r.Get("/config", func(w http.ResponseWriter, _ *http.Request) {
 			httpx.WriteJSON(w, http.StatusOK, map[string]LLMInfo{"llm": d.LLM})
+		})
+		r.Get("/briefs/examples", func(w http.ResponseWriter, _ *http.Request) {
+			examples := d.Examples
+			if examples == nil {
+				examples = []mock.Example{}
+			}
+			httpx.WriteJSON(w, http.StatusOK, map[string][]mock.Example{"examples": examples})
 		})
 		r.Get("/segments/fields", d.segmentFields)
 		r.Post("/segments/preview", d.segmentPreview)

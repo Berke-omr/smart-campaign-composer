@@ -1,0 +1,21 @@
+{
+  "id": "vip-thanks-izmir",
+  "example": true,
+  "title": "VIP thanks — İzmir",
+  "brief": "İzmir'de en az 5 siparişi olan müşterilere teşekkür mesajı ve %15 indirim gönder.",
+  "channels": ["sms", "email"],
+  "tone": "friendly",
+  "segment": [
+    {"answer": {"campaign_name": "VIP thanks — İzmir", "rule": {"match": "all", "conditions": [
+      {"field": "city", "op": "eq", "value": "İzmir"},
+      {"field": "order_count", "op": "gte", "value": 5}]}, "unsupported_criteria": []}}
+  ],
+  "sms": [
+    {"answer": {"text": "Merhaba {{first_name}} {{last_name}}, en sadık müşterilerimizden biri olduğun için sana çok teşekkür ederiz! Bu yüzden bir sonraki alışverişinde geçerli %15 indirim seni bekliyor."}},
+    {"answer": {"text": "Teşekkürler {{first_name}}! Sadık müşterimiz olduğun için bir sonraki alışverişinde %15 indirim seni bekliyor."}}
+  ],
+  "email": [
+    {"answer": {"subject": "Teşekkürler {{first_name}}, sana özel %15 indirim", "body": "Merhaba {{first_name}},\n\nUzun zamandır bizimle olduğun için teşekkür ederiz.\n\nBir sonraki alışverişinde %15 indirim seni bekliyor.\n\nSevgiyle,\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "sms": "valid@2", "email": "valid@1"}
+}

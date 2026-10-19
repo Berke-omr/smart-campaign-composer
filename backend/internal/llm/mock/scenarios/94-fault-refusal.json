@@ -1,0 +1,16 @@
+{
+  "id": "fault-refusal",
+  "brief": "[test] The SMS is declined twice (final); the email is declined once and then written.",
+  "channels": ["sms", "email"],
+  "tone": "friendly",
+  "segment": [{"answer": {"campaign_name": "Fault test — İstanbul", "rule": {"match": "all", "conditions": [{"field": "city", "op": "eq", "value": "İstanbul"}, {"field": "last_cart_add_at", "op": "within_last_days", "value": 30}]}, "unsupported_criteria": []}}],
+  "sms": [
+    {"fault": "refusal", "category": "general_harms"},
+    {"fault": "refusal", "category": "general_harms"}
+  ],
+  "email": [
+    {"fault": "refusal", "category": "reasoning_extraction"},
+    {"answer": {"subject": "{{first_name}}, sepetin seni bekliyor", "body": "Merhaba {{first_name}},\n\nSepetindeki ürünler seni bekliyor.\n\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "sms": "needs_manual_edit", "email": "valid@2"}
+}
