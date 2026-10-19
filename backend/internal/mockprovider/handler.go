@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"math"
 	"math/rand/v2"
 	"net/http"
@@ -179,6 +180,9 @@ func (p *Provider) send(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	// Read to the end: only then does the server notice a client that gives
+	// up (and cancel r.Context), which ends a slow answer early.
+	_, _ = io.Copy(io.Discard, r.Body)
 	if msg := missing(channel, body); msg != "" {
 		httpx.WriteError(w, http.StatusBadRequest, msg)
 		return

@@ -257,3 +257,20 @@ func TestLongest(t *testing.T) {
 		t.Errorf("Longest(nil) = %v", empty)
 	}
 }
+
+func TestEmailHTML(t *testing.T) {
+	got := EmailHTML("Sepet & indirim", "Merhaba Ayşe,\r\n\r\nSepetindeki <script>alert(1)</script> ürünler\nhâlâ seni bekliyor.\n\n\n%30 indirim!")
+	for _, want := range []string{
+		"<title>Sepet &amp; indirim</title>",
+		"<p>Merhaba Ayşe,</p>",
+		"<p>Sepetindeki &lt;script&gt;alert(1)&lt;/script&gt; ürünler<br>hâlâ seni bekliyor.</p>",
+		"<p>%30 indirim!</p>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("HTML lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "<script>") || strings.Count(got, "<p>") != 3 {
+		t.Errorf("unexpected HTML:\n%s", got)
+	}
+}
