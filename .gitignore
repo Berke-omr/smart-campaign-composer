@@ -1,0 +1,26 @@
+# Secrets — never commit real keys (.env.example is the template)
+.env
+.env.*
+!.env.example
+
+# Go
+/backend/bin/
+*.test
+*.out
+coverage.*
+
+# Frontend
+node_modules/
+/frontend/dist/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local tool settings
+.claude/settings.local.json
+
+# Logs
+*.log
