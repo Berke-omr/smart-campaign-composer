@@ -403,7 +403,9 @@ integration tests against Postgres in the container.
   values; SMS reaches `valid` while the email is still streaming; a disconnect stops the work and stores
   nothing.
 
-**Mutation checks** (each change was made, the named tests failed, the change was reverted):
+**Mutation checks.** Each change was made and had to compile, the named tests failed, and the change
+was reverted with `git status` clean afterwards. A mutant that does not compile proves nothing; its build
+error must not be mistaken for a test result.
 
 | Mutation | Caught by |
 |---|---|
@@ -412,13 +414,20 @@ integration tests against Postgres in the container.
 | strict decoding removed | 3 parse tests |
 | refusal treated as `end_turn` | 2 stop-reason tests + the recorded refusal |
 | rune count → `len()` | 3 content tests |
-| worst case → raw template length | 3 content tests (the first attempt at this mutation did not apply; redone) |
+| worst case → raw template length | 3 content tests (see the note below) |
 | channel filter dropped from the longest-value query | oracle comparison (13 vs 11 characters) |
 | example SMS lengthened past 160 | catalog consistency test |
 | `MaxAttempts` 3 → 2 | 4 generator tests |
 | over-long text silently cut to 160 | `TestNeverSilentlyTruncates` + fault test |
 | first refusal final | 2 generator tests |
 | campaign status always `ready` | 2 campaign tests |
+
+*Note on the worst-case mutation:* the first attempt replaced `RuneCountInString(rendered)` with
+`RuneCountInString(f.value)`, which left `rendered` unused, so the mutant did not compile
+(`declared and not used: rendered`). The test output had been filtered to `--- FAIL` lines, which hid the
+`[build failed]` line, and the following `ok (cached)` belonged to the run after the revert. At the time
+this was misreported as "the change did not apply". Reproduced on 2026-10-19 with unfiltered output; the
+mutation that compiles (`RuneCountInString(f.value) + 0*len(rendered)`) is caught by the 3 tests above.
 
 **Live stack** (through nginx, mock mode unless noted):
 ```
