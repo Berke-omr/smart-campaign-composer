@@ -26,8 +26,9 @@ type problemsResponse struct {
 }
 
 type contentErrorResponse struct {
-	Error  string         `json:"error"`
-	Report content.Report `json:"report"`
+	Error   string          `json:"error"`
+	Channel content.Channel `json:"channel,omitempty"`
+	Report  content.Report  `json:"report"`
 }
 
 // readJSON decodes a request body strictly into v.
@@ -65,6 +66,7 @@ func (d Deps) campaignError(w http.ResponseWriter, r *http.Request, err error) {
 	var input *campaign.InputError
 	var seg *llm.SegmentError
 	var ce *campaign.ContentError
+	var stale *campaign.StaleContentError
 	switch {
 	case errors.As(err, &input):
 		httpx.WriteJSON(w, http.StatusUnprocessableEntity, problemsResponse{Error: "invalid request", Details: input.Problems})
@@ -73,6 +75,14 @@ func (d Deps) campaignError(w http.ResponseWriter, r *http.Request, err error) {
 			Error: fmt.Sprintf("could not build an audience from this brief (%d attempts)", seg.Attempts), Details: seg.Problems})
 	case errors.As(err, &ce):
 		httpx.WriteJSON(w, http.StatusUnprocessableEntity, contentErrorResponse{Error: "invalid content", Report: ce.Report})
+	case errors.As(err, &stale):
+		httpx.WriteJSON(w, http.StatusUnprocessableEntity, contentErrorResponse{
+			Error:   fmt.Sprintf("the %s message no longer fits this audience; edit it and approve again", stale.Channel),
+			Channel: stale.Channel, Report: stale.Report})
+	case errors.Is(err, campaign.ErrNoRecipients):
+		httpx.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+	case errors.Is(err, campaign.ErrNotReady):
+		httpx.WriteError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, campaign.ErrNotFound):
 		httpx.WriteError(w, http.StatusNotFound, "campaign not found")
 	case errors.Is(err, campaign.ErrLocked):
@@ -118,6 +128,21 @@ func (d Deps) getCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, v)
+}
+
+// approveCampaign freezes the audience and starts sending. Approving again
+// returns the same result.
+func (d Deps) approveCampaign(w http.ResponseWriter, r *http.Request) {
+	id, ok := campaignID(w, r)
+	if !ok {
+		return
+	}
+	a, err := d.Campaigns.Approve(r.Context(), id)
+	if err != nil {
+		d.campaignError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, a)
 }
 
 // streamDrafts is the server-sent event stream of the message drafts

@@ -92,6 +92,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/campaigns/{id}", d.getCampaign)
 			r.Get("/campaigns/{id}/draft/stream", d.streamDrafts)
 			r.Put("/campaigns/{id}/messages/{channel}", d.editMessage)
+			r.Post("/campaigns/{id}/approve", d.approveCampaign)
 		}
 	})
 

@@ -1,6 +1,7 @@
 package content
 
 import (
+	"maps"
 	"math/rand/v2"
 	"strings"
 	"testing"
@@ -234,4 +235,25 @@ func FuzzValidate(f *testing.F) {
 			t.Fatalf("valid template rendered with a leftover placeholder: %q", s)
 		}
 	})
+}
+
+func TestLongest(t *testing.T) {
+	got := Longest([]Values{
+		{FirstName: "Ayşe", LastName: "Yılmaz", City: "İzmir"},
+		{FirstName: "Muhammed Emin", LastName: "Öz", City: "İstanbul"},
+		{FirstName: "ŞÖĞÜÇŞÖĞÜÇ", LastName: "Kaya", City: "Ankara"},
+	})
+	// Characters, not bytes: "ŞÖĞÜÇŞÖĞÜÇ" is 10 characters but 20 bytes, so
+	// it loses to "Muhammed Emin" (13 of each). Ties go to the value that
+	// sorts first.
+	want := Values{FirstName: "Muhammed Emin", LastName: "Yılmaz", City: "İstanbul"}
+	if !maps.Equal(got, want) {
+		t.Errorf("Longest = %v, want %v", got, want)
+	}
+	if tie := Longest([]Values{{City: "Bursa"}, {City: "Adana"}}); tie[City] != "Adana" {
+		t.Errorf("tie = %q, want Adana", tie[City])
+	}
+	if empty := Longest(nil); empty[FirstName] != "" || len(empty) != len(Variables) {
+		t.Errorf("Longest(nil) = %v", empty)
+	}
 }

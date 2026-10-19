@@ -199,3 +199,54 @@ func TestCampaignErrorsOverHTTP(t *testing.T) {
 		})
 	}
 }
+
+func TestApprovalOverHTTP(t *testing.T) {
+	srv := campaignServer(t)
+	create := func() int64 {
+		resp, body := do(t, http.MethodPost, srv.URL+"/api/campaigns",
+			fmt.Sprintf(`{"brief":%q,"channels":["sms","email"],"tone":"friendly"}`, sampleBrief))
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("create: %d %s", resp.StatusCode, body)
+		}
+		var c struct{ ID int64 }
+		_ = json.Unmarshal(body, &c)
+		return c.ID
+	}
+
+	draft := create()
+	resp, body := do(t, http.MethodPost, fmt.Sprintf("%s/api/campaigns/%d/approve", srv.URL, draft), "")
+	if resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "not ready") {
+		t.Errorf("approving a draft: %d %s", resp.StatusCode, body)
+	}
+
+	id := create()
+	stream, err := http.Get(fmt.Sprintf("%s/api/campaigns/%d/draft/stream", srv.URL, id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	readSSE(t, stream.Body)
+	stream.Body.Close()
+
+	url := fmt.Sprintf("%s/api/campaigns/%d/approve", srv.URL, id)
+	resp, first := do(t, http.MethodPost, url, "")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(first), `"status":"sending"`) ||
+		!strings.Contains(string(first), `"deliveries":{"sms":99,"email":133,"total":232}`) {
+		t.Fatalf("approve: %d %s", resp.StatusCode, first)
+	}
+	resp, second := do(t, http.MethodPost, url, "")
+	if resp.StatusCode != http.StatusOK || string(second) != string(first) {
+		t.Errorf("approving again: %d %s, want the same 200 body %s", resp.StatusCode, second, first)
+	}
+
+	resp, body = do(t, http.MethodGet, fmt.Sprintf("%s/api/campaigns/%d", srv.URL, id), "")
+	if !strings.Contains(string(body), `"status":"sending"`) || strings.Contains(string(body), `"approved_at":null`) {
+		t.Errorf("campaign after approval: %d %s", resp.StatusCode, body)
+	}
+	resp, body = do(t, http.MethodPut, fmt.Sprintf("%s/api/campaigns/%d/messages/sms", srv.URL, id), `{"text":"Merhaba"}`)
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("edit after approval: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := do(t, http.MethodPost, srv.URL+"/api/campaigns/999/approve", ""); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown campaign: %d %s", resp.StatusCode, body)
+	}
+}

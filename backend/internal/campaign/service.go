@@ -270,6 +270,66 @@ func (s *Service) end(id int64) {
 	delete(s.streaming, id)
 }
 
+// StaleContentError is a message that no longer fits the audience frozen at
+// approval: someone with a longer name joined the audience after the draft
+// was validated. Nothing was written; the marketer edits the message and
+// approves again.
+type StaleContentError struct {
+	Channel content.Channel
+	Report  content.Report
+}
+
+func (e *StaleContentError) Error() string {
+	return fmt.Sprintf("the %s message no longer fits this audience: %s", e.Channel, e.Report.Errors.Error())
+}
+
+// Approve freezes the audience and starts sending. Approving again returns
+// the same result.
+func (s *Service) Approve(ctx context.Context, id int64) (Approval, error) {
+	a, err := s.Repo.Approve(ctx, id, s.freeze)
+	if err != nil {
+		return Approval{}, err
+	}
+	s.Logger.Info("campaign approved", "campaign", id, "status", a.Status,
+		"sms", a.Deliveries.SMS, "email", a.Deliveries.Email)
+	return a, nil
+}
+
+// freeze reads, inside the approval's transaction, everyone each selected
+// channel reaches at the campaign's anchor time, the same anchor as the
+// preview the marketer confirmed (DECISIONS.md D24, K1). It validates each
+// message again against the longest values of exactly these people (D15)
+// and renders it for each of them (K2).
+func (s *Service) freeze(ctx context.Context, c Campaign, q segment.Querier) ([]NewDelivery, error) {
+	v, err := segment.ParseAndValidate(c.Rule, s.Registry)
+	if err != nil {
+		return nil, fmt.Errorf("campaign %d: stored rule no longer valid: %w", c.ID, err)
+	}
+	var out []NewDelivery
+	for _, ch := range c.Channels {
+		m, ok := c.Messages[ch]
+		if !ok || m.State != llm.StateValid {
+			return nil, ErrNotReady
+		}
+		rs, err := segment.Recipients(ctx, q, v, c.AsOf, ch)
+		if err != nil {
+			return nil, err
+		}
+		values := make([]content.Values, len(rs))
+		for i, r := range rs {
+			values[i] = r.Values
+		}
+		if report := content.Validate(ch, m.Message, content.Longest(values)); !report.Valid {
+			return nil, &StaleContentError{Channel: ch, Report: report}
+		}
+		for _, r := range rs {
+			out = append(out, NewDelivery{UserID: r.UserID, Channel: ch, Recipient: r.Address,
+				Message: content.RenderMessage(m.Message, r.Values)})
+		}
+	}
+	return out, nil
+}
+
 // ContentError is an edit the validator rejected; nothing was stored.
 type ContentError struct{ Report content.Report }
 
@@ -360,6 +420,8 @@ type View struct {
 	AsOf                time.Time                        `json:"as_of"`
 	LLM                 llmView                          `json:"llm"`
 	Messages            map[content.Channel]*MessageView `json:"messages"`
+	ApprovedAt          *time.Time                       `json:"approved_at"`
+	FinishedAt          *time.Time                       `json:"finished_at"`
 	CreatedAt           time.Time                        `json:"created_at"`
 	UpdatedAt           time.Time                        `json:"updated_at"`
 }
@@ -396,7 +458,8 @@ func (s *Service) view(c Campaign, av audienceView, longest map[content.Channel]
 		ID: c.ID, Name: c.Name, Status: c.Status, Brief: c.Brief, Tone: c.Tone, Channels: c.Channels,
 		Audience: av, Rule: c.Rule, UnsupportedCriteria: c.UnsupportedCriteria, AsOf: c.AsOf,
 		LLM:      llmView{Mode: c.LLMMode, Model: c.LLMModel},
-		Messages: map[content.Channel]*MessageView{}, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		Messages: map[content.Channel]*MessageView{}, ApprovedAt: c.ApprovedAt, FinishedAt: c.FinishedAt,
+		CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 	}
 	for _, ch := range c.Channels {
 		m, ok := c.Messages[ch]
