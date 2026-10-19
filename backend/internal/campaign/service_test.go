@@ -3,6 +3,7 @@ package campaign
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -307,9 +308,13 @@ func TestClientLeavingStoresNothing(t *testing.T) {
 	f.svc.Generator.AttemptTimeout = 0
 	v, _ := f.svc.Create(context.Background(), f.brief(t, "cart-reminder-istanbul"))
 
+	var logs lockedBuffer
+	f.svc.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
-	_ = f.svc.StreamDrafts(ctx, v.ID, func(string, any) error { return nil })
+	var rec recorder
+	_ = f.svc.StreamDrafts(ctx, v.ID, rec.emit)
 
 	got, _ := f.svc.Get(context.Background(), v.ID)
 	for ch, m := range got.Messages {
@@ -317,6 +322,34 @@ func TestClientLeavingStoresNothing(t *testing.T) {
 			t.Errorf("%s stored after the client left: %+v", ch, m)
 		}
 	}
+	// The unfinished channels are not even attempted to be saved: a save
+	// with the dead request would fail and report a spurious error.
+	for _, e := range rec.events {
+		if e.event == EventError {
+			t.Errorf("draft.error sent after the client left: %+v", e.data)
+		}
+	}
+	if strings.Contains(logs.String(), "saving draft failed") {
+		t.Errorf("a save was attempted after the client left:\n%s", logs.String())
+	}
+}
+
+// lockedBuffer is a log sink that is safe for concurrent writes.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
 }
 
 func TestLockedOnceSending(t *testing.T) {
