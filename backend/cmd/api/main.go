@@ -12,10 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/campaign"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/config"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/db"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpapi"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpx"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/anthropic"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/mock"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/logging"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/segment"
@@ -76,13 +79,36 @@ func run() error {
 		return fmt.Errorf("mock scenario catalog: %w", err)
 	}
 
+	registry := segment.NewRegistry(cities)
+	counter := segment.NewCounter(pool)
+	var client llm.Client
+	if llmCfg.Mode == config.LLMModeAnthropic {
+		client = anthropic.New(anthropic.Config{
+			APIKey: llmCfg.APIKey, Model: llmCfg.Model,
+			RequestTimeout: llmCfg.RequestTimeout, MaxRetries: llmCfg.MaxRetries,
+		})
+	} else {
+		client = mock.New(catalog, mock.DemoOptions(cities))
+	}
+	campaigns := &campaign.Service{
+		Repo:      campaign.NewRepository(pool),
+		Generator: &llm.Generator{Client: client, AttemptTimeout: llmCfg.RequestTimeout},
+		Registry:  registry,
+		Audience:  counter,
+		LLMMode:   llmInfo.Mode,
+		LLMModel:  llmInfo.Model,
+		Logger:    logger,
+		Now:       time.Now,
+	}
+
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Logger:    logger,
 		UserStats: userRepo,
-		Segments:  segment.NewRegistry(cities),
-		Audience:  segment.NewCounter(pool),
+		Segments:  registry,
+		Audience:  counter,
 		LLM:       llmInfo,
 		Examples:  catalog.Examples(),
+		Campaigns: campaigns,
 	})
 	srv := &http.Server{
 		Addr:              httpCfg.Addr,
