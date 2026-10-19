@@ -1,0 +1,101 @@
+# One-command setup: `docker compose up` (no .env needed; every variable has a default).
+#
+# Startup order:
+#   postgres (healthy) -> migrate (exits 0) -> seed (exits 0) -> api (healthy) -> frontend
+#                         migrate (exits 0) -> worker
+#   mock-provider starts independently.
+
+name: smart-campaign-composer
+
+x-backend: &backend
+  build:
+    context: ./backend
+    target: runtime
+  image: smart-campaign-composer/backend:local
+
+x-backend-env: &backend-env
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_URL: postgres://scc:scc@postgres:5432/scc?sslmode=disable
+
+x-http-healthcheck: &http-healthcheck
+  test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+  interval: 5s
+  timeout: 3s
+  retries: 10
+  start_period: 5s
+
+services:
+  postgres:
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_USER: scc
+      POSTGRES_PASSWORD: scc # local-only demo credentials
+      POSTGRES_DB: scc
+    # Bound to localhost on an uncommon port so it never clashes with a local Postgres.
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"
+    volumes:
+      # Postgres 18 images keep data under /var/lib/postgresql/18/docker.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scc -d scc"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    <<: *backend
+    command: ["/app/migrate"]
+    environment: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  seed:
+    <<: *backend
+    command: ["/app/seed"]
+    environment:
+      <<: *backend-env
+      SEED_USERS: ${SEED_USERS:-5000}
+      SEED_RANDOM_SEED: ${SEED_RANDOM_SEED:-42}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  api:
+    <<: *backend
+    command: ["/app/api"]
+    environment:
+      <<: *backend-env
+      HTTP_ADDR: ":8080"
+    ports:
+      - "${API_HOST_PORT:-8081}:8080"
+    healthcheck: *http-healthcheck
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    <<: *backend
+    command: ["/app/worker"]
+    environment: *backend-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  mock-provider:
+    <<: *backend
+    command: ["/app/mockprovider"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      HTTP_ADDR: ":8080"
+    # Only published for debugging; the worker reaches it on the compose network.
+    ports:
+      - "127.0.0.1:${MOCK_PROVIDER_HOST_PORT:-18090}:8080"
+    healthcheck: *http-healthcheck
+    restart: unless-stopped
+
+volumes:
+  pgdata:
