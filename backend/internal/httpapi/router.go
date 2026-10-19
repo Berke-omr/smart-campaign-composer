@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpx"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/segment"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/users"
 )
 
@@ -19,14 +20,25 @@ import (
 type Deps struct {
 	Logger    *slog.Logger
 	UserStats UserStatsReader
+	Segments  *segment.Registry
+	Audience  AudienceCounter
+	// Now is the clock used to anchor relative-time rules; nil means time.Now.
+	Now func() time.Time
 }
 
 type UserStatsReader interface {
 	Stats(ctx context.Context) (users.Stats, error)
 }
 
+type AudienceCounter interface {
+	Count(ctx context.Context, v segment.Validated, asOf time.Time) (segment.Audience, error)
+}
+
 // NewRouter returns the API's root handler.
 func NewRouter(d Deps) http.Handler {
+	if d.Now == nil {
+		d.Now = time.Now
+	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(d.Logger))
@@ -47,6 +59,8 @@ func NewRouter(d Deps) http.Handler {
 			}
 			httpx.WriteJSON(w, http.StatusOK, stats)
 		})
+		r.Get("/segments/fields", d.segmentFields)
+		r.Post("/segments/preview", d.segmentPreview)
 	})
 
 	return r

@@ -17,6 +17,7 @@ import (
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpapi"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpx"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/logging"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/segment"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/users"
 )
 
@@ -46,9 +47,25 @@ func run() error {
 	}
 	defer pool.Close()
 
+	userRepo := users.NewRepository(pool)
+
+	// The segment registry's city list comes from the data, so the LLM can
+	// only target cities that exist. Read once at startup (re-seeding with
+	// different cities needs an api restart).
+	cities, err := userRepo.DistinctCities(ctx)
+	if err != nil {
+		return fmt.Errorf("load cities: %w", err)
+	}
+	if len(cities) == 0 {
+		logger.Warn("no users in the database; the city field is not targetable until the api restarts after seeding")
+	}
+	logger.Info("segment registry ready", "cities", len(cities))
+
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Logger:    logger,
-		UserStats: users.NewRepository(pool),
+		UserStats: userRepo,
+		Segments:  segment.NewRegistry(cities),
+		Audience:  segment.NewCounter(pool),
 	})
 	srv := &http.Server{
 		Addr:              httpCfg.Addr,
