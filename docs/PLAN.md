@@ -18,8 +18,8 @@
 | P0 | Plan & docs | ✅ done | 2026-10-19 |
 | P1 | Skeleton & infrastructure | ✅ done (PR, branch `feat/p1-skeleton`) | 2026-10-19 |
 | P2 | Segment DSL & audience | ✅ done (PR, branch `feat/p2-segment-dsl`) | 2026-10-19 |
-| P3 | LLM layer | ⏳ next | — |
-| P4 | Approval & delivery pipeline | ⬜ | — |
+| P3 | LLM layer | ✅ done (PR, branch `feat/p3-llm`) | 2026-10-19 |
+| P4 | Approval & delivery pipeline | ⏳ next | — |
 | P5 | Tracking (SSE, metrics, health) | ⬜ | — |
 | P6 | Frontend | ⬜ | — |
 | P7 | Hardening & submission | ⬜ | — |
@@ -103,11 +103,11 @@ IDs are referenced from tests and commits so reviewers can see which requirement
 ### P3 — LLM layer
 - **Goal:** brief → validated segment rule + validated SMS/email drafts, with or without an API key.
 - **Deliverables:**
-  - `internal/llm`: `Client` interface; `anthropic` implementation (structured outputs); `mock` implementation driven by a scenario catalog (`testdata/llm-scenarios/`: happy-path and fault scenarios, streaming).
+  - `internal/llm`: `Client` interface; `anthropic` implementation (structured outputs); `mock` implementation driven by a scenario catalog (`internal/llm/mock/scenarios/`, embedded: happy-path and fault scenarios, streaming).
   - Prompts + JSON schemas for segment and content; two-layer validation (schema shape, then business rules).
   - Repair loop: on validation failure, re-ask with the concrete errors (max 2 retries), then surface errors.
   - `internal/content`: variable whitelist, length rules (rune-based), worst-case length check, renderer.
-  - Campaign draft endpoints + SSE stream for content generation (`draft.delta`, `draft.validated`, `draft.invalid`, `draft.repairing`).
+  - Campaign draft endpoints + SSE stream for content generation (`draft.state` with the design's states, `draft.delta`, `draft.error`, `draft.done`; DECISIONS.md D23).
   - Provider selection: `LLM_PROVIDER=auto|anthropic|mock`, model via `LLM_MODEL` (default Claude Sonnet 5.5, `claude-sonnet-5-5`, D13). The SDK client is built from explicit options.
   - **Design-driven additions (DECISIONS.md D22):**
     - Generate request: brief + selected channels + tone. The model also returns a short campaign name.
@@ -229,7 +229,7 @@ smart-campaign-composer/
 ├── README.md · DECISIONS.md · Makefile · .env.example · .gitignore
 ├── docker-compose.yml          # postgres, api, worker, mock-provider, frontend, seed (one-shot)
 ├── docker-compose.test.yml     # make test → tests run in containers against a real postgres
-├── docs/          CASE.md · PLAN.md
+├── docs/          CASE.md · PLAN.md · API.md
 ├── ai-sessions/   README.md (session index) + exports
 ├── backend/                    # single Go module, one Dockerfile, several binaries
 │   ├── cmd/
@@ -242,13 +242,14 @@ smart-campaign-composer/
 │   │   ├── db/                 # pgx pool, migrations runner
 │   │   ├── segment/            # DSL types, field registry, validator, SQL compiler
 │   │   ├── content/            # variables, length rules, validator, renderer
-│   │   ├── llm/                # Client interface, anthropic/, mock/, prompts, schemas, repair loop
+│   │   ├── llm/                # Client interface, prompts, schemas, parsing, generator (repair loop)
+│   │   │   ├── anthropic/      # Claude client; testdata/recorded = real API responses
+│   │   │   └── mock/           # mock LLM; scenarios/*.json embedded (not testdata: Go skips it)
 │   │   ├── campaign/           # state machine, service, repository
 │   │   ├── delivery/           # queue claim, rate limiter, retry policy, provider client
 │   │   ├── httpapi/            # handlers, SSE, middleware
 │   │   └── metrics/
-│   ├── migrations/
-│   └── testdata/               # LLM fixtures (recorded real responses + faulty cases)
+│   └── migrations/
 ├── frontend/                   # Vue 3 + Vite + TS, served by nginx
 │   └── src/ api/ · views/ (Composer, CampaignDashboard, Campaigns) · components/
 └── .github/workflows/ci.yml    # bonus
@@ -355,4 +356,87 @@ api log                                             -> "segment registry ready",
 integration tests against Postgres in the container.
 
 ### P3
-_pending_
+
+**Real API (Claude Sonnet 5.5, Go SDK v1.82.0), 11 paid calls in total (≤ $0.07):**
+- *SDK binding (D8):* `OutputConfigParam{Effort, Format: JSONOutputFormatParam{Schema}}` exists in the SDK
+  source, so Structured Outputs is used directly. `option.WithoutEnvironmentDefaults()` stops the SDK from
+  reading base URLs, tokens or profiles from the environment (D12).
+- *Smoke test A* (`go test -tags live`, 8 calls, responses recorded under
+  `internal/llm/anthropic/testdata/recorded/`). The 12-variant segment schema is accepted by the real API.
+
+  | Call | Effort | Total | First text | Input / cache read / cache write / output | Result |
+  |---|---|---|---|---|---|
+  | segment, sample brief | low | 3.76 s | – | 102 / 0 / 4,413 / 133 | 3 conditions, "Cart reminder — İstanbul" |
+  | segment, sample brief | medium | – | – | 102 / 4,413 / 0 / 3,636 (3,532 thinking) | **declined** (`reasoning_extraction`) after part of the JSON |
+  | segment, İstanbul or Ankara, 90 days | low | 2.04 s | – | 90 / 4,413 / 0 / 107 | `city in [...]` + no purchase in 90 days |
+  | segment, "kadın kullanıcılar" | low | 1.75 s | – | 71 / 4,413 / 0 / 95 | cart in 60 days; unsupported: "kadın kullanıcılar (cinsiyet)" |
+  | SMS | low | 2.45 s | 1.84 s | 256 / 0 / 540 / 69 | worst case 116 / 160 |
+  | email | low | 11.43 s | 9.88 s | 254 / 0 / 622 / 182 | subject 49 / 80 |
+  | SMS | medium | 1.69 s | 1.28 s | 256 / 540 / 0 / 70 | worst case 105 / 160 |
+  | email | medium | 10.00 s | 8.83 s | 254 / 622 / 0 / 174 | subject 56 / 80 |
+
+  Outcome: effort `low` for every task (medium was no better and produced the only refusal); a refusal is
+  retried once (D23); a prompt rule forbids suffixes on variables after the email wrote `{{city}}'daki`
+  (wrong for İzmir). The prompt cache works for both the segment prefix (4,413 tokens) and the content prefixes.
+- *Smoke test B* (the app itself in anthropic mode, 3 calls): `POST /api/campaigns` 2.81 s with the design's
+  three audience lines; SMS first text 2.48 s, valid at 2.73 s (worst case 124 / 160); email first text
+  1.60 s, valid at 3.17 s (subject 56 / 80). The email used "`{{city}} için`", so the suffix rule worked. The
+  ~9 s email delay from smoke test A did not recur. Reopening the stream replayed the stored drafts with no
+  model call.
+
+**Validation and repair (mock LLM, all in `make test`):**
+- *One test per fault scenario*, each pinned to the exact state sequence the UI shows (`TestFaultScenarios`):
+  broken JSON → `writing1 validating1 fixing2 validating2 valid2`; 200-character SMS → three attempts then
+  `needs_manual_edit3`; unknown variable → repaired on attempt 2; refusal → declined twice is final
+  (`writing1 fixing2 needs_manual_edit2`), declined once recovers; timeout → `fixing2 fixing3
+  needs_manual_edit3`; unknown field (segment) → repaired on attempt 2, with the validator's message quoted
+  in the repair prompt.
+- *Scenario catalog consistency:* every scenario declares its outcome (`valid@N` / `needs_manual_edit`), and
+  a test recomputes it from the scripted answers with the real validators and the attempt budget.
+- *Recorded Claude answers* are replayed through the real SDK and the whole generator (segment valid on
+  attempt 1; SMS `writing → validating → valid`; a real refusal is a typed error even after partial JSON).
+- *Content rules:* 160 `ş` (320 bytes) valid / 161 rejected; worst case uses the longest values of the
+  channel's recipients ("Muhammed Emin", "Montgomery-Fitzgerald"); a property test renders every accepted
+  template for random recipients and never exceeds 160; Postgres `char_length` equals Go's rune count on
+  the whole seed; `FuzzValidate` (361,258 execs) and `FuzzPartialStrings` (2,396,842 execs) found nothing.
+- *Streaming:* for every prefix of 300 random answers the decoded field values are prefixes of the final
+  values; SMS reaches `valid` while the email is still streaming; a disconnect stops the work and stores
+  nothing.
+
+**Mutation checks** (each change was made, the named tests failed, the change was reverted):
+
+| Mutation | Caught by |
+|---|---|
+| `auto` ignores the key | `TestLoadLLMProviderSelection` |
+| `maxLength` in the SMS schema | schema subset test |
+| strict decoding removed | 3 parse tests |
+| refusal treated as `end_turn` | 2 stop-reason tests + the recorded refusal |
+| rune count → `len()` | 3 content tests |
+| worst case → raw template length | 3 content tests (the first attempt at this mutation did not apply; redone) |
+| channel filter dropped from the longest-value query | oracle comparison (13 vs 11 characters) |
+| example SMS lengthened past 160 | catalog consistency test |
+| `MaxAttempts` 3 → 2 | 4 generator tests |
+| over-long text silently cut to 160 | `TestNeverSilentlyTruncates` + fault test |
+| first refusal final | 2 generator tests |
+| campaign status always `ready` | 2 campaign tests |
+
+**Live stack** (through nginx, mock mode unless noted):
+```
+GET  /api/config                    -> {"llm":{"mode":"mock","model":null}}  (anthropic mode: model claude-sonnet-5-5)
+LLM_PROVIDER=anthropic, no key      -> api exits: "LLM_PROVIDER=anthropic needs ANTHROPIC_API_KEY"
+POST /api/segments/preview          -> 175 people, SMS 98 (77 excluded), email 132 (43 excluded), 230 messages
+GET  /api/briefs/examples           -> 5 examples
+POST /api/campaigns (sample brief)  -> 201 "Cart reminder — İstanbul", draft, in 0.44 s
+GET  .../draft/stream (curl -N)     -> 66 events over 1.75 s; SMS valid at 0.99 s while the email streamed; draft.done ready
+PUT  .../messages/sms (161 chars)   -> 422 with the report
+```
+Live counts are 175, not 177: the seed's timestamps are fixed at seed time while "the last 30 days" moves
+with the clock. Tests pin `asOf` and still get 177 / 99 / 133.
+
+**Test suite:** `make test` exit 0 (13 Go packages with `-race` against Postgres, Vitest 3 passed).
+
+**Deviations from the P3 plan:**
+- SSE event names follow the design's states (`draft.state` + `draft.delta` + `draft.error` + `draft.done`)
+  instead of `draft.validated` / `draft.invalid` / `draft.repairing` (decision K6, D23).
+- The mock scenario catalog lives in `internal/llm/mock/scenarios/` (embedded), not `testdata/` (K5).
+- A refusal is retried once within the 3 attempts, instead of never (decided after smoke test A, D23).
