@@ -97,5 +97,22 @@ services:
     healthcheck: *http-healthcheck
     restart: unless-stopped
 
+  frontend:
+    build:
+      context: ./frontend
+      target: runtime
+    image: smart-campaign-composer/frontend:local
+    ports:
+      - "${UI_HOST_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:
