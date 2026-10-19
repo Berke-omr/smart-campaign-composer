@@ -444,6 +444,26 @@ with the clock. Tests pin `asOf` and still get 177 / 99 / 133.
 
 **Test suite:** `make test` exit 0 (13 Go packages with `-race` against Postgres, Vitest 3 passed).
 
+**Follow-up after review (2026-10-19):**
+- *Email first-token delay* (~9 s in smoke test A): measured by phase with `go test -tags live -run
+  '^TestEmailLatency$'` (4 calls, ≤ $0.016). Response headers, `message_start`, the text block and the first
+  text delta arrive together, with no thinking block (0 thinking tokens):
+
+  | Call | Headers = first text | End | Note |
+  |---|---|---|---|
+  | email #1 | 1.93 s | 3.64 s | prompt cache written |
+  | email #2 | 1.16 s | 3.05 s | cache read |
+  | email #3 | 1.15 s | 2.85 s | cache read |
+  | SMS (control) | 3.15 s | 3.62 s | prompt cache written |
+
+  The 9 s delay did not recur in four later samples (smoke test B and #1–#3). The whole wait is before the API
+  sends its response headers, so it is on the API side, not in our streaming code. Closed as transient; the
+  per-attempt timeout (60 s) already covers a slow start, and the card shows "Writing…" meanwhile.
+- *Untested guard:* removing the "do not save after the client left" check passed every test (a save
+  with the dead request fails anyway). `TestClientLeavingStoresNothing` now also requires no `draft.error`
+  and no logged save failure; removing the check fails it 3 of 3 times, and the intact code passes 10 of
+  10 runs with `-race`.
+
 **Deviations from the P3 plan:**
 - SSE event names follow the design's states (`draft.state` + `draft.delta` + `draft.error` + `draft.done`)
   instead of `draft.validated` / `draft.invalid` / `draft.repairing` (decision K6, D23).

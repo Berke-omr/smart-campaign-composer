@@ -7,7 +7,8 @@
 // latency and token usage.
 //
 //	set -a; . ../.env; set +a
-//	go test -tags live -run TestLive -v ./internal/llm/anthropic/
+//	go test -tags live -run '^TestLive$' -v ./internal/llm/anthropic/         (8 calls, records fixtures)
+//	go test -tags live -run '^TestEmailLatency$' -v ./internal/llm/anthropic/ (4 calls, timing only)
 //
 // Response headers are not recorded (they carry account identifiers).
 package anthropic
@@ -21,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -208,4 +210,122 @@ func TestLive(t *testing.T) {
 	}
 	fmt.Printf("\n== total tokens in %d out %d, cost at $2/$10 per MTok: $%.4f\n",
 		inTok, outTok, float64(inTok)*2/1e6+float64(outTok)*10/1e6)
+}
+
+// phaseTransport records when the response headers and selected stream
+// events of the latest request arrived, to split a slow first token into
+// "the API had not answered yet" and "the answer started but no text yet".
+type phaseTransport struct {
+	mu    sync.Mutex
+	start time.Time
+	marks map[string]time.Duration
+	body  bytes.Buffer
+}
+
+var phaseMarkers = []struct{ name, marker string }{
+	{"message_start", "event: message_start"},
+	{"thinking_block", `"content_block":{"type":"thinking"`},
+	{"text_block", `"content_block":{"type":"text"`},
+	{"first_text_delta", `"type":"text_delta"`},
+	{"message_delta", "event: message_delta"},
+}
+
+func (p *phaseTransport) reset() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.start, p.marks = time.Now(), map[string]time.Duration{}
+	p.body.Reset()
+}
+
+func (p *phaseTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := http.DefaultTransport.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	p.marks["headers"] = time.Since(p.start)
+	p.mu.Unlock()
+	resp.Body = &phaseBody{ReadCloser: resp.Body, p: p}
+	return resp, nil
+}
+
+type phaseBody struct {
+	io.ReadCloser
+	p *phaseTransport
+}
+
+func (b *phaseBody) Read(buf []byte) (int, error) {
+	n, err := b.ReadCloser.Read(buf)
+	if n > 0 {
+		p := b.p
+		p.mu.Lock()
+		p.body.Write(buf[:n])
+		for _, m := range phaseMarkers {
+			if _, seen := p.marks[m.name]; !seen && bytes.Contains(p.body.Bytes(), []byte(m.marker)) {
+				p.marks[m.name] = time.Since(p.start)
+			}
+		}
+		p.mu.Unlock()
+	}
+	return n, err
+}
+
+// TestEmailLatency measures where the time before the first token goes:
+// three email requests and one SMS request as a control, streamed as the
+// app streams them. Nothing is recorded to testdata.
+func TestEmailLatency(t *testing.T) {
+	key := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
+	if key == "" {
+		t.Skip("ANTHROPIC_API_KEY is not set")
+	}
+	pt := &phaseTransport{marks: map[string]time.Duration{}}
+	client := New(Config{APIKey: key, Model: "claude-sonnet-5-5", RequestTimeout: 90 * time.Second, MaxRetries: 0,
+		HTTPClient: &http.Client{Transport: pt}})
+	cb := llm.ContentBrief{
+		Brief: sampleBrief, Tone: llm.ToneFriendly, CampaignName: "Cart reminder — İstanbul",
+		Audience: []string{"City is İstanbul", "Added to cart in the last 30 days", "No purchase in the last 30 days"},
+		Longest:  sampleLongest,
+	}
+	request := func(ch content.Channel) llm.Request {
+		return llm.Request{Task: llm.Task(ch), Brief: sampleBrief, Attempt: 1,
+			System: llm.ContentSystem(ch), Prompt: llm.ContentPrompt(ch, cb, nil), Schema: llm.ContentSchema(ch)}
+	}
+	thinking := regexp.MustCompile(`"thinking_tokens":(\d+)`)
+	var inTok, outTok int64
+	fmt.Printf("\n%-8s %8s %8s %8s %8s %8s %8s %8s  %s\n", "call", "headers", "msg_strt", "thinking", "text_blk", "1st_text", "end", "total", "tokens in/cache r/cache w/out (thinking)")
+	for i, ch := range []content.Channel{content.Email, content.Email, content.Email, content.SMS} {
+		pt.reset()
+		start := time.Now()
+		var first time.Duration
+		resp, err := client.Complete(context.Background(), request(ch), func(string) {
+			if first == 0 {
+				first = time.Since(start)
+			}
+		})
+		total := time.Since(start)
+		if err != nil {
+			t.Errorf("%s #%d: %v", ch, i+1, err)
+			continue
+		}
+		pt.mu.Lock()
+		marks := pt.marks
+		th := "0"
+		if m := thinking.FindSubmatch(pt.body.Bytes()); m != nil {
+			th = string(m[1])
+		}
+		pt.mu.Unlock()
+		sec := func(name string) string {
+			if d, ok := marks[name]; ok {
+				return fmt.Sprintf("%.2fs", d.Seconds())
+			}
+			return "-"
+		}
+		fmt.Printf("%-8s %8s %8s %8s %8s %8.2fs %8s %7.2fs  %d/%d/%d/%d (%s)\n", fmt.Sprintf("%s#%d", ch, i+1),
+			sec("headers"), sec("message_start"), sec("thinking_block"), sec("text_block"), first.Seconds(),
+			sec("message_delta"), total.Seconds(), resp.Usage.InputTokens, resp.Usage.CacheReadTokens,
+			resp.Usage.CacheWriteTokens, resp.Usage.OutputTokens, th)
+		inTok += resp.Usage.InputTokens + resp.Usage.CacheReadTokens + resp.Usage.CacheWriteTokens
+		outTok += resp.Usage.OutputTokens
+	}
+	fmt.Printf("total tokens in %d out %d, at most $%.4f\n", inTok, outTok, float64(inTok)*2.5/1e6+float64(outTok)*10/1e6)
 }

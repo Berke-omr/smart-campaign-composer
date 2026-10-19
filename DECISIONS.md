@@ -455,9 +455,10 @@ Verification log → P3.
   `internal/llm/testdata/prompts/` make every prompt change visible in review.
 - **Campaign name:** produced by the audience call (English, two to five words), because the draft
   screen shows it before any message has streamed.
-- **Observed, not acted on:** in smoke test A the email's first token took ~9 s at both effort levels
-  (SMS ~1.5 s); in smoke test B, through the app, it took 1.6 s. If it recurs, the next step is to
-  measure the email prompt and schema separately.
+- **Observed, then closed:** in smoke test A the email's first token took ~9 s at both effort levels
+  (SMS ~1.5 s). In four later samples it took 1.2–1.9 s. A phase measurement shows that the response
+  headers and the first text arrive together, with no thinking, so the wait is on the API side before
+  the response starts. No change; the per-attempt timeout covers a slow start (PLAN.md, P3 follow-up).
 
 ---
 
