@@ -29,6 +29,8 @@
 | D16 | Testing strategy | Accepted |
 | D17 | Frontend stack | Accepted (UI library chosen in P6) |
 | D18 | Observability endpoints | Accepted |
+| D19 | Migrations and seed run as one-shot compose services | Accepted (P1) |
+| D20 | Integration tests: one fresh database per test | Accepted (P1) |
 
 ---
 
@@ -282,6 +284,31 @@
   - Histograms: LLM latency, provider latency.
   - Count of LLM validation failures and repairs.
 
+## D19 — Migrations and seed run as one-shot compose services
+
+- **Options:** (a) separate `migrate` and `seed` containers that run once and exit; (b) the api
+  migrates and seeds on startup.
+- **Decision:** (a). Startup order is explicit in compose (`service_completed_successfully`):
+  `postgres → migrate → seed → api`, and `migrate → worker`.
+- **Why:** Running several api replicas can't race on migrations. "Process is up" and "data is
+  ready" stay separate signals. A failed migration stops the stack visibly instead of
+  crash-looping the api.
+- **Safety nets anyway:**
+  - Migrations hold a Postgres advisory lock (goose session locker), so concurrent migrators wait.
+  - The seeder takes `LOCK TABLE users IN EXCLUSIVE MODE` and skips when rows exist, so it is
+    idempotent and safe to re-run (`make reseed` uses `-reset`).
+  - Both are tested with three concurrent runners.
+
+## D20 — Integration tests: one fresh database per test
+
+- **Decision:** `testdb.New(t)` creates a uniquely named database, migrates it, and drops it
+  (`WITH (FORCE)`) when the test ends.
+- **Why:** `go test ./...` runs packages in parallel against the same server. Sharing one database
+  with truncation between tests would make them race. Creating a database costs ~50 ms, which is
+  acceptable.
+- **No false greens:** without `TEST_DATABASE_URL` the tests skip, so a laptop `go test` works.
+  `make test` sets `REQUIRE_DB_TESTS=1`, which turns the skip into a failure.
+
 ---
 
 ## Assumptions
@@ -300,6 +327,7 @@
 | A10 | Users of the tool | Single marketer, no authentication or multi-tenancy |
 | A11 | Content language | Same as the brief (per-user language is bonus B3) |
 | A12 | After approval | Content is locked; no editing (pause/cancel is nice-to-have) |
+| A13 | UI language | Interface text in English (like Insider One's product UI); briefs and generated messages stay in the brief's language (Turkish in the examples) |
 
 ## Open questions (deferred — HR not contacted yet)
 

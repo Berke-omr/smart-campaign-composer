@@ -16,8 +16,8 @@
 | Phase | Title | Status | Date |
 |---|---|---|---|
 | P0 | Plan & docs | ✅ done | 2026-10-19 |
-| P1 | Skeleton & infrastructure | ⏳ next | — |
-| P2 | Segment DSL & audience | ⬜ | — |
+| P1 | Skeleton & infrastructure | ✅ done (PR, branch `feat/p1-skeleton`) | 2026-10-19 |
+| P2 | Segment DSL & audience | ⏳ next | — |
 | P3 | LLM layer | ⬜ | — |
 | P4 | Approval & delivery pipeline | ⬜ | — |
 | P5 | Tracking (SSE, metrics, health) | ⬜ | — |
@@ -248,4 +248,48 @@ Evidence recorded at the end of each phase.
   (5 differ only by an added "—" separator between step title and description).
 
 ### P1
+
+**Clean-clone acceptance run** (fresh `git clone` of the branch into an empty directory, no `.env`,
+dev stack and volumes removed first, images built with `--no-cache`):
+
+```
+docker compose build --no-cache                  -> exit 0
+docker compose up -d --wait                      -> exit 0 (18 s); api, frontend, mock-provider,
+                                                    postgres healthy; migrate + seed exited 0
+curl :8081/healthz                               -> 200
+curl :8080/api/stats/users (through nginx)       -> {"total":5000,"sms_opt_in":3156,"email_opt_in":3714}
+curl :8080/                                      -> <title>Smart Campaign Composer</title>
+SELECT count(*) FROM users                       -> 5000
+docker compose run --rm seed (second run)        -> "users already present, skipping"; count still 5000
+make test                                        -> exit 0 (7 Go packages ok with -race; Vitest 3 passed)
+```
+
+**Checks made while building P1:**
+- Tests can fail: a deliberately failing Go test and a failing Vitest spec each make
+  `make test-backend`, `make test-frontend` and `make test` exit non-zero (status 2).
+- `REQUIRE_DB_TESTS=1` without `TEST_DATABASE_URL` fails the integration tests instead of skipping.
+- Mutation check on the seed: allowing SMS consent without a phone is caught twice: by the Go
+  invariant test (per-user message) and by the DB constraint `users_sms_opt_in_needs_phone` on COPY.
+- Seed is identical across platforms: macOS (native Go) and the Linux container produce the same
+  counts (3156 SMS / 3714 email opt-ins) for seed 42.
+- Concurrency: three simultaneous migrators and three simultaneous seeders → schema applied once,
+  users inserted exactly once (advisory lock / `LOCK TABLE`).
+- Graceful shutdown: `docker compose stop api` logs "shutting down http server"; runtime runs as
+  uid 10001; backend image 80 MB.
+- Bad config reports every invalid variable at once (`LOG_LEVEL` and `HTTP_SHUTDOWN_TIMEOUT` together).
+- Browser check of http://localhost:8080: tiles render 5,000 / 3,156 (63%) / 3,714 (74%), no console errors.
+- Sample brief audience measured on the seed (P2 will reproduce it through the DSL):
+  İstanbul + cart in last 30 days + no purchase in last 30 days = **177 users**
+  (99 SMS-reachable, 133 email-reachable). The plan's estimate of 250–300 assumed ~25% recent
+  carts; the generator yields ~18%.
+
+**Deviations from the P1 plan:**
+- Mock provider host port is `127.0.0.1:18090`, not 8090: 8090 (and 8082) were taken on the dev
+  machine, which is exactly the clash reviewers could hit. It is debug-only, so it moved to an
+  uncommon port bound to localhost.
+- `npm audit`: 4 high findings, all in the dev-only lint toolchain (`braces` via
+  `@vue/eslint-config-typescript`); production dependencies have 0. Fix requires a breaking
+  upgrade, so it is deferred; nothing from that chain ships in the nginx image.
+
+### P2
 _pending_
