@@ -36,7 +36,8 @@ func run() error {
 	common, errCommon := config.LoadCommon(config.OSLookup)
 	httpCfg, errHTTP := config.LoadHTTP(config.OSLookup)
 	dbCfg, errDB := config.LoadDatabase(config.OSLookup)
-	if err := errors.Join(errCommon, errHTTP, errDB); err != nil {
+	llmCfg, errLLM := config.LoadLLM(config.OSLookup)
+	if err := errors.Join(errCommon, errHTTP, errDB, errLLM); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
 	logger := logging.New("api", common.LogLevel)
@@ -61,11 +62,18 @@ func run() error {
 	}
 	logger.Info("segment registry ready", "cities", len(cities))
 
+	llmInfo := httpapi.LLMInfo{Mode: string(llmCfg.Mode)}
+	if llmCfg.Mode == config.LLMModeAnthropic {
+		llmInfo.Model = &llmCfg.Model
+	}
+	logger.Info("llm ready", "mode", llmInfo.Mode, "model", llmCfg.Model)
+
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Logger:    logger,
 		UserStats: userRepo,
 		Segments:  segment.NewRegistry(cities),
 		Audience:  segment.NewCounter(pool),
+		LLM:       llmInfo,
 	})
 	srv := &http.Server{
 		Addr:              httpCfg.Addr,

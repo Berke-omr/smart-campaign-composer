@@ -1,6 +1,6 @@
 // Package config loads service configuration from environment variables.
 //
-// Every binary composes the sections it needs (Common, HTTP, Database, Seed).
+// Every binary composes the sections it needs (Common, HTTP, Database, Seed, LLM).
 // Loaders take a Lookup function instead of reading os.Getenv directly so they
 // can be tested with a plain map.
 package config
@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -52,6 +53,56 @@ type Database struct {
 type Seed struct {
 	Users      int
 	RandomSeed uint64
+}
+
+// LLMMode is the LLM implementation the api runs with.
+type LLMMode string
+
+const (
+	LLMModeAnthropic LLMMode = "anthropic"
+	LLMModeMock      LLMMode = "mock"
+)
+
+// DefaultLLMModel is Claude Sonnet 5.5 (DECISIONS.md D13).
+const DefaultLLMModel = "claude-sonnet-5-5"
+
+// LLM holds the Claude settings. Mode is already resolved: LLM_PROVIDER=auto
+// becomes anthropic when ANTHROPIC_API_KEY is set and mock otherwise, so the
+// rest of the program never has to interpret "auto".
+type LLM struct {
+	Mode           LLMMode
+	Model          string
+	APIKey         string
+	RequestTimeout time.Duration
+	MaxRetries     int
+}
+
+func LoadLLM(env Lookup) (LLM, error) {
+	r := reader{env: env}
+	key, _ := env("ANTHROPIC_API_KEY")
+	c := LLM{
+		Model:          r.str("LLM_MODEL", DefaultLLMModel),
+		APIKey:         strings.TrimSpace(key),
+		RequestTimeout: r.duration("LLM_TIMEOUT", 60*time.Second),
+		MaxRetries:     r.intRange("LLM_MAX_RETRIES", 2, 0, 10),
+	}
+	switch provider := r.str("LLM_PROVIDER", "auto"); provider {
+	case "auto":
+		c.Mode = LLMModeMock
+		if c.APIKey != "" {
+			c.Mode = LLMModeAnthropic
+		}
+	case "anthropic":
+		c.Mode = LLMModeAnthropic
+		if c.APIKey == "" {
+			r.errs = append(r.errs, errors.New("LLM_PROVIDER=anthropic needs ANTHROPIC_API_KEY"))
+		}
+	case "mock":
+		c.Mode = LLMModeMock
+	default:
+		r.errs = append(r.errs, fmt.Errorf("LLM_PROVIDER: %q is not one of auto, anthropic, mock", provider))
+	}
+	return c, r.err()
 }
 
 func LoadCommon(env Lookup) (Common, error) {

@@ -78,3 +78,26 @@ func TestUserStatsRejectsWrongMethod(t *testing.T) {
 		t.Fatalf("status = %d, want 405", rec.Code)
 	}
 }
+
+func TestConfigReportsLLMMode(t *testing.T) {
+	model := "claude-sonnet-5-5"
+	tests := []struct {
+		name string
+		llm  LLMInfo
+		want string
+	}{
+		{"mock", LLMInfo{Mode: "mock"}, `{"llm":{"mode":"mock","model":null}}` + "\n"},
+		{"anthropic", LLMInfo{Mode: "anthropic", Model: &model}, `{"llm":{"mode":"anthropic","model":"claude-sonnet-5-5"}}` + "\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := serve(t, Deps{LLM: tt.llm}, http.MethodGet, "/api/config")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			if body := rec.Body.String(); body != tt.want {
+				t.Errorf("body = %q, want %q", body, tt.want)
+			}
+		})
+	}
+}
