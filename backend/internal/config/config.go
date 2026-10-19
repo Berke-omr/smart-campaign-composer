@@ -141,6 +141,30 @@ func LoadMockProvider(env Lookup) (MockProvider, error) {
 	return c, r.err()
 }
 
+// Worker holds the delivery worker's settings (DECISIONS.md D24).
+type Worker struct {
+	ProviderURL     string
+	ProviderTimeout time.Duration // one provider call; a slower answer is a timeout
+	Senders         int           // concurrent provider calls per channel
+	Lease           time.Duration // how long a claimed row stays claimed
+}
+
+func LoadWorker(env Lookup) (Worker, error) {
+	r := reader{env: env}
+	c := Worker{
+		ProviderURL:     strings.TrimRight(r.str("PROVIDER_URL", "http://mock-provider:8080"), "/"),
+		ProviderTimeout: r.duration("PROVIDER_TIMEOUT", 3*time.Second),
+		Senders:         r.intRange("WORKER_CONCURRENCY", 32, 1, 1000),
+		Lease:           r.duration("WORKER_LEASE", 30*time.Second),
+	}
+	// A lease shorter than a call would let a second claim send while the
+	// first call is still waiting for its answer.
+	if c.Lease < 2*c.ProviderTimeout {
+		r.errs = append(r.errs, fmt.Errorf("WORKER_LEASE (%s) must be at least twice PROVIDER_TIMEOUT (%s)", c.Lease, c.ProviderTimeout))
+	}
+	return c, r.err()
+}
+
 func LoadCommon(env Lookup) (Common, error) {
 	r := reader{env: env}
 	c := Common{LogLevel: r.logLevel("LOG_LEVEL", slog.LevelInfo)}

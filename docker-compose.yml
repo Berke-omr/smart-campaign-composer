@@ -2,8 +2,7 @@
 #
 # Startup order:
 #   postgres (healthy) -> migrate (exits 0) -> seed (exits 0) -> api (healthy) -> frontend
-#                         migrate (exits 0) -> worker
-#   mock-provider starts independently.
+#                         migrate (exits 0) + mock-provider (healthy) -> worker
 
 name: smart-campaign-composer
 
@@ -81,13 +80,21 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # One replica: the 100 messages/second/channel limit is kept in-process (D4).
   worker:
     <<: *backend
     command: ["/app/worker"]
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      PROVIDER_URL: http://mock-provider:8080
+      PROVIDER_TIMEOUT: ${PROVIDER_TIMEOUT:-3s}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-32}
+      WORKER_LEASE: ${WORKER_LEASE:-30s}
     depends_on:
       migrate:
         condition: service_completed_successfully
+      mock-provider:
+        condition: service_healthy
     restart: unless-stopped
 
   mock-provider:

@@ -241,3 +241,20 @@ func TestLoadMockProvider(t *testing.T) {
 		t.Errorf("rates above 1: %v", err)
 	}
 }
+
+func TestLoadWorker(t *testing.T) {
+	c, err := LoadWorker(MapLookup(nil))
+	want := Worker{ProviderURL: "http://mock-provider:8080", ProviderTimeout: 3 * time.Second, Senders: 32, Lease: 30 * time.Second}
+	if err != nil || c != want {
+		t.Errorf("defaults = %+v (err %v), want %+v", c, err, want)
+	}
+	c, err = LoadWorker(MapLookup(map[string]string{"PROVIDER_URL": "http://localhost:18090/", "PROVIDER_TIMEOUT": "500ms",
+		"WORKER_CONCURRENCY": "8", "WORKER_LEASE": "1s"}))
+	if err != nil || c.ProviderURL != "http://localhost:18090" || c.Senders != 8 || c.Lease != time.Second {
+		t.Errorf("overrides = %+v (err %v)", c, err)
+	}
+	_, err = LoadWorker(MapLookup(map[string]string{"PROVIDER_TIMEOUT": "20s", "WORKER_CONCURRENCY": "0"}))
+	if err == nil || !strings.Contains(err.Error(), "WORKER_LEASE (30s) must be at least twice") || !strings.Contains(err.Error(), "WORKER_CONCURRENCY") {
+		t.Errorf("bad values: %v", err)
+	}
+}
