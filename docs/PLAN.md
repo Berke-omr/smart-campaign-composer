@@ -108,14 +108,23 @@ IDs are referenced from tests and commits so reviewers can see which requirement
   - Repair loop: on validation failure, re-ask with the concrete errors (max 2 retries), then surface errors.
   - `internal/content`: variable whitelist, length rules (rune-based), worst-case length check, renderer.
   - Campaign draft endpoints + SSE stream for content generation (`draft.delta`, `draft.validated`, `draft.invalid`, `draft.repairing`).
-  - Provider selection: `LLM_PROVIDER=auto|anthropic|mock`.
+  - Provider selection: `LLM_PROVIDER=auto|anthropic|mock`, model via `LLM_MODEL` (default Claude Sonnet 5.5, `claude-sonnet-5-5`, D13). The SDK client is built from explicit options.
+  - **Design-driven additions (DECISIONS.md D22):**
+    - Generate request: brief + selected channels + tone. The model also returns a short campaign name.
+    - Per-channel draft states `writing → validating → fixing (attempt n of 3) → valid / needs_manual_edit`. SMS is validated as soon as its JSON is complete, while email may still stream.
+    - Preview response adds per-channel consent exclusions and total channel messages (e.g. 99 + 133 = 232).
+    - Preview rendering for a fictional sample user, plus a worst-case rendering with the audience's longest values. The API returns those longest values and the computed lengths (D15).
+    - `GET /api/briefs/examples`: briefs of the happy-path mock scenarios.
+    - The API reports the LLM mode (mock / anthropic).
+    - Campaign statuses Draft, Ready, Sending, Completed, Failed. `segment.Describe` uses the design's wording.
+  - `docs/API.md`: REST and SSE contract (endpoints, event types, states). It is the input for P6.
 - **Done when:**
   - With the mock: sample brief → valid DSL → count → streamed, validated SMS + email.
   - Every fault scenario (broken JSON, unknown field, 200-char SMS, unknown variable, refusal, timeout) produces the expected repair-then-error behaviour — one test per scenario.
   - The real-key path is treated as the primary demo: prompts and error handling polished as if evaluators run with a key.
-  - Manual smoke test with a real key; the real responses are saved as fixtures under `testdata/` and replayed in tests.
-  - Go SDK binding for `output_config.format` verified against the SDK source (fallback: strict tool use).
-- **Estimate:** 8 h. **Covers:** R1, R5 (API), R6, R7, R16, R17, U1.
+  - Smoke test on the real Anthropic API with Sonnet 5.5 (the number of calls agreed in advance). The responses are saved as fixtures under `testdata/` and replayed in tests.
+  - Go SDK binding for `output_config.format` verified against the SDK source, and the 12-variant schema accepted by the real API. Fallbacks: strict tool use / a generic condition schema.
+- **Estimate:** 9 h (+1 h for the design-driven additions). **Covers:** R1, R5 (API), R6, R7, R16, R17, U1.
 
 ### P4 — Approval & delivery pipeline
 - **Goal:** reliable, rate-limited, exactly-once-effect sending.
@@ -126,6 +135,8 @@ IDs are referenced from tests and commits so reviewers can see which requirement
   - Retry policy: exponential backoff with full jitter for 5xx/timeouts/network errors; honour `Retry-After` on 429; permanent failure on other 4xx; max attempts → `failed`.
   - `Idempotency-Key: <delivery id>` on every provider call.
   - Mock provider: configurable latency, 5xx rate, 429 rate and its own rate limit via env; idempotency-key dedup.
+  - `delivery_attempts` log: one row per provider call (HTTP status, error, `retry_after`, timestamp). It feeds the dashboard's "Recent issues" (D22).
+  - Message states Queued, Sending, Sent, Retrying, Failed.
 - **Done when (integration tests against real Postgres):**
   - Approving twice creates one set of deliveries.
   - Provider accepts but the response times out → retry → provider records exactly one message.
@@ -136,8 +147,11 @@ IDs are referenced from tests and commits so reviewers can see which requirement
 
 ### P5 — Tracking
 - **Goal:** observable sending.
-- **Deliverables:** `GET /api/campaigns/{id}/events` (SSE, periodic aggregate snapshots), `/metrics` (Prometheus), `/healthz` (liveness) + `/readyz` (DB ping).
-- **Done when:** `curl -N` shows snapshots changing during a send; counters on `/metrics` increase; `/readyz` fails when Postgres is stopped.
+- **Deliverables:**
+  - `GET /api/campaigns/{id}/events` (SSE, periodic aggregate snapshots).
+  - Snapshots also carry per-channel sends per second for the last 30 s (for the speed chart against the 100/s line) and the latest issues from `delivery_attempts` (D22).
+  - `/metrics` (Prometheus), `/healthz` (liveness) + `/readyz` (DB ping).
+- **Done when:** `curl -N` shows snapshots changing during a send, and no per-second value exceeds 100 per channel. Counters on `/metrics` increase. `/readyz` fails when Postgres is stopped.
 - **Estimate:** 3 h. **Covers:** R13 (API), R14, R15.
 
 ### P6 — Frontend
@@ -146,8 +160,9 @@ IDs are referenced from tests and commits so reviewers can see which requirement
   - Composer: brief input → segment card (rule as readable chips, explanation, counts per channel, unsupported-criteria warnings) → streamed drafts → live character counters, variable highlighting, preview rendered for a sample user → edit → approve dialog with final counts.
   - Campaign dashboard: per-channel progress, status counts, throughput, recent errors.
   - Campaign list. "Mock LLM" badge when running without a key.
+  - **Visual reference:** `DESIGN.md` + `design/screens/`, visual only (D22). Glass theme tokens in one theme file. Fonts self-hosted via npm, so there is no runtime dependency on Google Fonts. Revisit D17: own small components may fit the glass style better than a themed UI library.
 - **Done when:** full flow works in the browser with the mock LLM; edited content is re-validated by the backend (an over-limit edit is rejected); a few Vitest component tests pass.
-- **Estimate:** 10 h. **Covers:** R3, R5, R8, R13 (UI).
+- **Estimate:** 10–12 h (design-heavy). **Covers:** R3, R5, R8, R13 (UI).
 
 ### P7 — Hardening & submission
 - **Deliverables:** README (setup, architecture diagram, known gaps), final DECISIONS.md, e2e smoke script, secret scan, `ai-sessions/` exports + index.
@@ -178,7 +193,7 @@ IDs are referenced from tests and commits so reviewers can see which requirement
 | 7 | Sun 25 Oct | P7 (+ CI bonus if time) |
 | — | Mon 26 Oct | Buffer: final clean-clone check, export sessions, submit |
 
-Core estimate ≈ 44 h. P3 and P4 are the most likely to overrun; the buffer is the bonus time and the morning of 26 Oct.
+Core estimate ≈ 44 h, revised to ≈ 47 h after the design review (P3 +1 h, P6 +2 h; D22). P3, P4 and P6 are the most likely to overrun; the buffer is the bonus time and the morning of 26 Oct.
 
 ## Cut order (if time runs short; first item is cut first)
 
@@ -204,6 +219,8 @@ mock LLM, mock provider with real faults, queue + rate limit + retry + dedup, SS
 | SSE buffered by the frontend proxy | nginx `proxy_buffering off` for SSE routes; verified with `curl -N` |
 | Reviewer machine differences (arm64/amd64, no Go/Node installed) | Multi-arch base images; everything runs in containers, including tests |
 | Secrets/PII leaking into `ai-sessions/` | `.env` git-ignored; secret scan before submit |
+| API spend during development | Smoke tests are few and agreed before each run; afterwards the recorded fixtures are replayed |
+| Design-heavy frontend (glass UI) overruns P6 | Visual reference only (D22); cut order item 7 (dashboard polish) applies first |
 
 ## Target repository layout
 

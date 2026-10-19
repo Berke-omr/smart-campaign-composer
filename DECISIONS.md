@@ -23,15 +23,16 @@
 | D10 | Two-layer validation + repair loop | Accepted |
 | D11 | Streaming: segment non-streamed, content streamed | Accepted |
 | D12 | LLM abstraction and mock LLM | Accepted |
-| D13 | Model selection | Accepted |
+| D13 | Model selection: Claude Sonnet 5.5 | Accepted (revised before P3) |
 | D14 | User data model: profile attributes | Accepted |
 | D15 | Content rules: length, variables, email format | Accepted |
 | D16 | Testing strategy | Accepted |
-| D17 | Frontend stack | Accepted (UI library chosen in P6) |
+| D17 | Frontend stack | Accepted (UI library to revisit in P6, see D22) |
 | D18 | Observability endpoints | Accepted |
 | D19 | Migrations and seed run as one-shot compose services | Accepted (P1) |
 | D20 | Integration tests: one fresh database per test | Accepted (P1) |
 | D21 | How the segment engine is verified | Accepted (P2) |
+| D22 | Design reference: visual only; adopted additions | Accepted (before P3) |
 
 ---
 
@@ -144,6 +145,11 @@
 - **To verify (P3):** the Go SDK binding for `output_config.format` is not in the docs we checked.
   We will confirm it against the SDK source. If it is missing, we fall back to B, which is
   documented for Go.
+- **How it is verified (P3):** a one-time smoke test on the real Anthropic API with Claude Sonnet
+  5.5 (D13), using the developer's own `ANTHROPIC_API_KEY`. The number of calls is agreed in
+  advance. Responses are recorded as fixtures and replayed in tests, so CI and reviewers without a
+  key still exercise the real response shape. Sonnet 5.5 rejects forced `tool_choice` (400), which
+  is one more reason to prefer C over B.
 - **Segment schema (built in P2):** `segment.RuleSchema` generates the rule's schema from the
   registry. It has 12 `anyOf` variants, one per (field, operator group), so incompatible
   combinations and unknown cities are excluded at generation time. Whether the real API accepts a
@@ -236,9 +242,18 @@
 
 ## D12 — LLM abstraction and mock LLM
 
-- **Decision:** `llm.Client` interface with two implementations: `anthropic` and `mock`. The
-  provider is chosen by `LLM_PROVIDER=auto|anthropic|mock`; `auto` uses Anthropic when
-  `ANTHROPIC_API_KEY` is set and the mock otherwise. The UI shows a "Mock LLM" badge.
+- **Decision:** `llm.Client` interface with two implementations: `anthropic` (the official
+  Anthropic Go SDK) and `mock`.
+  - The provider is chosen by `LLM_PROVIDER=auto|anthropic|mock`: `auto` uses Anthropic when
+    `ANTHROPIC_API_KEY` is set and the mock otherwise.
+  - `LLM_MODEL` overrides the default model (D13).
+  - The API reports which mode is active so the UI can show a demo/mock badge.
+- **Client construction is explicit:** key, retries and timeouts are passed as SDK options
+  (`option.WithAPIKey`, `WithMaxRetries`, `WithRequestTimeout`) from our config. We do not rely on
+  the SDK silently picking up environment variables, so what runs is what the config says.
+- **Why only the direct API:** the case requires the key to come from `ANTHROPIC_API_KEY`, and the
+  developer uses the same key path as reviewers. An OpenRouter path was considered and dropped
+  before P3.
 - **Mock behaviour — scenario catalog:**
   - Each scenario is a fixture file (`backend/testdata/llm-scenarios/`) describing a brief and the
     scripted model responses for it: segment JSON, content stream chunks, and optional faults per
@@ -250,14 +265,27 @@
     unmatched brief falls back to a generic keyword-based response so a reviewer can still try their
     own brief without a key.
   - Streams with artificial delay so the UI behaves like the real thing.
+  - **Example-brief library** (`GET /api/briefs/examples`, D22): the happy-path scenarios' briefs
+    are exposed as ready-made examples, so a reviewer without a key can run a deterministic
+    end-to-end demo with one click.
 - **Recorded fixtures:** real Claude responses captured once with a key and replayed in tests, so
   tests also cover the real response shape.
 
-## D13 — Model selection
+## D13 — Model selection: Claude Sonnet 5.5
 
-- **Decision:** default `claude-opus-5-5`, configurable via `ANTHROPIC_MODEL`. `effort` is set
-  explicitly per call (not left to the model default), tuned for latency in P3.
-- **Note:** on this model thinking cannot be disabled; `effort` is the speed/depth control.
+- **Decision:** Claude Sonnet 5.5 (`claude-sonnet-5-5`), configurable via `LLM_MODEL`.
+  *(Revised before P3; the first draft defaulted to Opus 5.5.)*
+- **Why:** both tasks (rule extraction and short copy) are interactive. The marketer waits for
+  them, so latency and cost per draft matter more than maximum reasoning depth.
+- **Model behaviour we design around:**
+  - `effort` is set explicitly per call, not left to the model default (levels are recalibrated on
+    this model); it is tuned for latency in P3.
+  - `thinking: {type: "disabled"}` returns 400. If latency requires it, we use
+    `{type: "between_tools"}` or a lower effort.
+  - Forced `tool_choice` returns 400, consistent with structured outputs as the primary method (D8).
+  - `stop_reason` of `refusal` or `max_tokens` is handled before any parsing (D10).
+- **To evaluate in P3:** the server-side refusal fallback (`fallbacks: "default"` with the
+  `server-side-fallback-2026-07-01` beta), so a refused request can still be answered.
 
 ## D14 — User data model: profile attributes
 
@@ -283,6 +311,12 @@
   for empty data. Unknown variables are validation errors.
 - **Email:** subject (≤ 80) + plain-text body. The backend wraps it in a simple HTML template.
   Claude never produces HTML.
+- **Design conflict resolved in favour of this rule (D22):** the design counts the raw template
+  and uses a single variable. We keep three variables and the worst-case check.
+  - The API returns the longest value of each variable in the audience and the computed
+    worst-case lengths.
+  - The UI counter shows the same number the backend enforces, so the screen never disagrees with
+    validation.
 
 ## D16 — Testing strategy
 
@@ -300,7 +334,8 @@
 
 - **Decision:** Vue 3 (Composition API) + Vite + TypeScript, served as a static build by nginx,
   which also proxies `/api` (SSE unbuffered).
-- **Component library:** Naive UI or PrimeVue, decided at the start of P6.
+- **Component library:** Naive UI or PrimeVue, decided at the start of P6. To revisit: the
+  design's glass style (D22) may be easier with our own small components than with a themed library.
 
 ## D18 — Observability endpoints
 
@@ -351,6 +386,39 @@ nothing crashes. It is tested from four independent angles:
 Each angle was confirmed with a deliberate mutation that the tests then caught (PLAN.md →
 Verification log → P2).
 
+## D22 — Design reference: visual only; adopted additions
+
+- **Input:** `DESIGN.md` and `design/screens/` (composer, draft generating, live sending), added
+  before P3.
+- **Decision:** the design is a **visual** reference: layout, components, colour and typography.
+  Product rules come from CASE.md and this file. Where the design disagrees, our decisions win:
+  - **Variables:** `{{first_name}}`, `{{last_name}}`, `{{city}}` stay (A3/D15). The design uses
+    only `first_name`.
+  - **Length:** the worst-case rendered length is checked (D15). The design counts the raw template.
+  - **Copy rules** in DESIGN.md (e.g. never mentioning AI in the UI) are not binding; A13 applies.
+- **Adopted from the design (API additions, P3):**
+  - The generate request takes the brief, the selected channels (SMS/email) and a tone. The model
+    also returns a short campaign name.
+  - Per-channel draft states: `writing → validating → fixing (attempt n of 3) → valid /
+    needs_manual_edit`. Three attempts in total = the D10 repair loop. SMS can be validated while
+    email is still streaming.
+  - Campaign statuses: Draft, Ready, Sending, Completed, Failed. Message states (P4): Queued,
+    Sending, Sent, Retrying, Failed.
+  - `Describe` uses the design's wording, e.g. "Added to cart in the last 30 days" and
+    "No purchase in the last 30 days".
+  - The API reports the LLM mode (mock or anthropic) for a demo badge.
+- **Suggested by us and accepted:**
+
+  | Feature | Phase | Why |
+  |---|---|---|
+  | Consent-exclusion counts per channel and total channel messages in the preview (e.g. 99 + 133 = 232) | P3 | Makes R4 visible: people without consent are shown as excluded, never as reachable |
+  | Example-brief library tied to mock scenarios (`GET /api/briefs/examples`) | P3 | Gives key-less reviewers a deterministic demo |
+  | Worst-case preview with the audience's longest name, next to a fictional sample user | P3 | Makes D15 visible instead of a hidden rule |
+  | "Recent issues" feed from a `delivery_attempts` log, and per-second sends per channel for a "last 30 s" chart | P4/P5 | Shows retries, 429s and the 100/s limit live (R10, R12) |
+
+- **Out of scope** (present in the design, no backend): search, notifications, settings, profile,
+  and the Audiences and Templates pages.
+
 ---
 
 ## Assumptions
@@ -377,7 +445,8 @@ Resolved for now with working assumptions; revisit before submission.
 
 1. **Real key or mock during evaluation?** → Assume **both**. The real-key path is treated as the
    primary demo (prompts, latency, error handling polished as if evaluators use a key); the mock LLM
-   is a scenario catalog (D12) that tests and key-less runs rely on.
+   is a scenario catalog (D12) that tests and key-less runs rely on. *Development uses the
+   developer's own `ANTHROPIC_API_KEY` with Sonnet 5.5 (D13), so the reviewer path is the tested path.*
 2. **Repository visibility?** → Private during development; visibility decided before submission.
 
 ## Out of scope (will be listed in README)
