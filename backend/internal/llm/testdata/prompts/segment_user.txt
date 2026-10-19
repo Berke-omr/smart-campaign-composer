@@ -1,0 +1,5 @@
+Build the audience rule for this brief.
+
+<brief>
+Son 30 günde sepetine ürün ekleyip alışveriş yapmayan İstanbul'daki kullanıcılara %30 indirim hatırlatması gönder. Samimi ama kısa olsun.
+</brief>
