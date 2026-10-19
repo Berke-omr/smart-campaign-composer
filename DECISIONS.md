@@ -31,6 +31,7 @@
 | D18 | Observability endpoints | Accepted |
 | D19 | Migrations and seed run as one-shot compose services | Accepted (P1) |
 | D20 | Integration tests: one fresh database per test | Accepted (P1) |
+| D21 | How the segment engine is verified | Accepted (P2) |
 
 ---
 
@@ -143,6 +144,11 @@
 - **To verify (P3):** the Go SDK binding for `output_config.format` is not in the docs we checked.
   We will confirm it against the SDK source. If it is missing, we fall back to B, which is
   documented for Go.
+- **Segment schema (built in P2):** `segment.RuleSchema` generates the rule's schema from the
+  registry. It has 12 `anyOf` variants, one per (field, operator group), so incompatible
+  combinations and unknown cities are excluded at generation time. Whether the real API accepts a
+  schema of this size is verified in P3; if it does not, we fall back to a single generic
+  condition schema, and the validator remains the real guarantee either way.
 - **Schema limits that shape the design:**
   - No recursive schemas → the DSL is flat (D9).
   - No `minLength`/`maxLength` or `minimum`/`maximum` → character limits and numeric ranges
@@ -178,6 +184,27 @@
 - **Unsupported criteria:** If the brief asks for something the registry cannot express (e.g.
   gender), Claude must list it in `unsupported_criteria` instead of guessing. The UI shows a warning.
 - **Consent is not part of the DSL:** the backend always appends the channel consent filter (R4).
+
+**As implemented in P2:**
+
+- **Fields:**
+  - Targetable: `city`, `language`, `last_cart_add_at`, `last_purchase_at`, `created_at`,
+    `order_count`, `total_spent`.
+  - Not targetable: names, email, phone (personal data) and the consent flags.
+- **Operators:**
+  - Enums: `eq`, `neq`, `in`, `not_in`.
+  - Relative time: `within_last_days`, `not_within_last_days`, `is_null`, `is_not_null`.
+  - Numbers: `eq`…`lte` and `between`.
+- **City list comes from the data:** read at api startup, most common first (P2 decision K2a).
+- **Empty conditions target all users** (K3a), needed for briefs like "all email subscribers".
+- **"Parse, don't validate":** `Validate` returns a `Validated` value with unexported fields, and
+  `Compile` accepts only that type. The compiler cannot be handed an unchecked rule; this is
+  enforced by the type system, not by convention.
+- **Relative-time cutoffs:** computed in Go from an `asOf` time (UTC), not with SQL `now()`.
+  Results are reproducible, and P4 can count at approval with the same anchor as the preview.
+- **No indexes yet:** the sample brief runs as a 1.3 ms sequential scan over 5,000 rows. At real
+  scale the first candidates are btree indexes on `city`, `last_cart_add_at` and
+  `last_purchase_at`, or a precomputed segment table.
 
 ## D10 — Two-layer validation + repair loop
 
@@ -308,6 +335,21 @@
   acceptable.
 - **No false greens:** without `TEST_DATABASE_URL` the tests skip, so a laptop `go test` works.
   `make test` sets `REQUIRE_DB_TESTS=1`, which turns the skip into a failure.
+
+## D21 — How the segment engine is verified
+
+The segment engine decides who receives messages, so wrong counts are a business bug even when
+nothing crashes. It is tested from four independent angles:
+
+| Angle | What it catches |
+|---|---|
+| Differential test against a Go oracle (300 random rules) | Semantic bugs in the compiler: NULL handling, flipped comparisons, a missing consent filter |
+| Three-way sample brief (compiler / hand SQL / oracle) | The case's own example drifting |
+| SQL-shape test (2,000 random rules) + fuzzing | Any input text leaking into the SQL string |
+| Structured error codes per rule violation | The repair loop in P3 receiving vague feedback |
+
+Each angle was confirmed with a deliberate mutation that the tests then caught (PLAN.md →
+Verification log → P2).
 
 ---
 

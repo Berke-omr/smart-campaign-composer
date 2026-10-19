@@ -38,6 +38,24 @@ func TestStatsMatchesGeneratedUsers(t *testing.T) {
 	}
 }
 
+func TestDistinctCitiesMostCommonFirst(t *testing.T) {
+	pool := testdb.New(t)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `INSERT INTO users (first_name, last_name, city) VALUES
+		('A','A','Bursa'), ('B','B','İstanbul'), ('C','C','İstanbul'), ('D','D','Ankara'), ('E','E','İstanbul'), ('F','F','Ankara')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := users.NewRepository(pool).DistinctCities(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"İstanbul", "Ankara", "Bursa"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Errorf("DistinctCities() = %v, want %v", got, want)
+	}
+}
+
 func TestStatsOnEmptyTable(t *testing.T) {
 	pool := testdb.New(t)
 	got, err := users.NewRepository(pool).Stats(context.Background())
