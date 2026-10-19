@@ -71,7 +71,7 @@ Urbanist is for headings; Inter is for UI and message content, with `font-varian
 
 | Role / size token | Size / weight / line-height | Font | Use |
 | --- | --- | --- | --- |
-| Home hero / `--font-size-hero` | 64px / 600 / 72px | Urbanist | “Good morning, Ömer” |
+| Home hero / `--font-size-hero` | 64px / 600 / 72px | Urbanist | “Good morning, User” |
 | H1 / `--font-size-h1` | 36px / 700 / 44px | Urbanist | Campaign screen title |
 | H2 / `--font-size-h2` | 24px / 700 / 32px | Urbanist | Sections, major card headings |
 | H3 / `--font-size-h3` | 20px / 600 / 28px | Urbanist | Channel/card subheadings |
