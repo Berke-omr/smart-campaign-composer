@@ -95,6 +95,10 @@ services:
         condition: service_completed_successfully
       mock-provider:
         condition: service_healthy
+    # On SIGTERM the worker finishes the calls in hand for up to 8 s. Docker's
+    # grace period before SIGKILL is set here so it does not depend on the
+    # machine's default (it was 1 s on the development machine).
+    stop_grace_period: 10s
     restart: unless-stopped
 
   mock-provider:
