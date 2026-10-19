@@ -96,6 +96,17 @@ services:
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HTTP_ADDR: ":8080"
+      # Faults (DECISIONS.md D24, K5). Empty values use the provider's defaults:
+      # 20-120 ms latency, 3% 503, 3% 429, 0.5% slow accepts (10 s),
+      # 1% rejected recipients, 100 requests per channel per second.
+      MOCK_LATENCY_MIN: ${MOCK_LATENCY_MIN:-}
+      MOCK_LATENCY_MAX: ${MOCK_LATENCY_MAX:-}
+      MOCK_ERROR_RATE: ${MOCK_ERROR_RATE:-}
+      MOCK_THROTTLE_RATE: ${MOCK_THROTTLE_RATE:-}
+      MOCK_SLOW_RATE: ${MOCK_SLOW_RATE:-}
+      MOCK_SLOW_DELAY: ${MOCK_SLOW_DELAY:-}
+      MOCK_REJECT_RATE: ${MOCK_REJECT_RATE:-}
+      MOCK_RATE_LIMIT: ${MOCK_RATE_LIMIT:-}
     # Only published for debugging; the worker reaches it on the compose network.
     ports:
       - "127.0.0.1:${MOCK_PROVIDER_HOST_PORT:-18090}:8080"

@@ -105,6 +105,42 @@ func LoadLLM(env Lookup) (LLM, error) {
 	return c, r.err()
 }
 
+// MockProvider is how the fake SMS/email provider misbehaves (DECISIONS.md
+// D24, K5). Rates are fractions of requests, drawn in this order: 503,
+// random 429, slow accept; their sum is at most 1. Rejections are decided by
+// recipient, so a rejected address is rejected every time.
+type MockProvider struct {
+	LatencyMin   time.Duration
+	LatencyMax   time.Duration
+	ErrorRate    float64       // 503
+	ThrottleRate float64       // 429 with Retry-After 1–2 s
+	SlowRate     float64       // accepted, but answered after SlowDelay
+	SlowDelay    time.Duration // longer than the worker's timeout
+	RejectRate   float64       // 400 invalid recipient
+	RateLimit    int           // requests per channel in any 1 s window; 0 = no limit
+}
+
+func LoadMockProvider(env Lookup) (MockProvider, error) {
+	r := reader{env: env}
+	c := MockProvider{
+		LatencyMin:   r.durationOrZero("MOCK_LATENCY_MIN", 20*time.Millisecond),
+		LatencyMax:   r.durationOrZero("MOCK_LATENCY_MAX", 120*time.Millisecond),
+		ErrorRate:    r.fraction("MOCK_ERROR_RATE", 0.03),
+		ThrottleRate: r.fraction("MOCK_THROTTLE_RATE", 0.03),
+		SlowRate:     r.fraction("MOCK_SLOW_RATE", 0.005),
+		SlowDelay:    r.duration("MOCK_SLOW_DELAY", 10*time.Second),
+		RejectRate:   r.fraction("MOCK_REJECT_RATE", 0.01),
+		RateLimit:    r.intRange("MOCK_RATE_LIMIT", 100, 0, 100_000),
+	}
+	if c.LatencyMin > c.LatencyMax {
+		r.errs = append(r.errs, fmt.Errorf("MOCK_LATENCY_MIN (%s) is above MOCK_LATENCY_MAX (%s)", c.LatencyMin, c.LatencyMax))
+	}
+	if sum := c.ErrorRate + c.ThrottleRate + c.SlowRate; sum > 1 {
+		r.errs = append(r.errs, fmt.Errorf("MOCK_ERROR_RATE + MOCK_THROTTLE_RATE + MOCK_SLOW_RATE = %g; at most 1", sum))
+	}
+	return c, r.err()
+}
+
 func LoadCommon(env Lookup) (Common, error) {
 	r := reader{env: env}
 	c := Common{LogLevel: r.logLevel("LOG_LEVEL", slog.LevelInfo)}
@@ -191,6 +227,34 @@ func (r *reader) duration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// durationOrZero is duration, but accepts 0 (e.g. no latency).
+func (r *reader) durationOrZero(key string, def time.Duration) time.Duration {
+	v, ok := r.env(key)
+	if !ok || v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		r.errs = append(r.errs, fmt.Errorf("%s: %q is not a duration of 0 or more (e.g. 50ms)", key, v))
+		return def
+	}
+	return d
+}
+
+// fraction reads a number between 0 and 1.
+func (r *reader) fraction(key string, def float64) float64 {
+	v, ok := r.env(key)
+	if !ok || v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f < 0 || f > 1 {
+		r.errs = append(r.errs, fmt.Errorf("%s: %q is not a number between 0 and 1", key, v))
+		return def
+	}
+	return f
 }
 
 func (r *reader) logLevel(key string, def slog.Level) slog.Level {

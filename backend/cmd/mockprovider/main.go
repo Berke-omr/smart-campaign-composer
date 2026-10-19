@@ -31,14 +31,18 @@ func run() error {
 
 	common, errCommon := config.LoadCommon(config.OSLookup)
 	httpCfg, errHTTP := config.LoadHTTP(config.OSLookup)
-	if err := errors.Join(errCommon, errHTTP); err != nil {
+	mockCfg, errMock := config.LoadMockProvider(config.OSLookup)
+	if err := errors.Join(errCommon, errHTTP, errMock); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
 	logger := logging.New("mockprovider", common.LogLevel)
+	logger.Info("faults", "latency", mockCfg.LatencyMin.String()+"-"+mockCfg.LatencyMax.String(),
+		"error_rate", mockCfg.ErrorRate, "throttle_rate", mockCfg.ThrottleRate, "slow_rate", mockCfg.SlowRate,
+		"slow_delay", mockCfg.SlowDelay.String(), "reject_rate", mockCfg.RejectRate, "rate_limit", mockCfg.RateLimit)
 
 	srv := &http.Server{
 		Addr:              httpCfg.Addr,
-		Handler:           mockprovider.NewHandler(),
+		Handler:           mockprovider.New(mockCfg, uint64(time.Now().UnixNano())).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return httpx.ListenAndServe(ctx, srv, httpCfg.ShutdownTimeout, logger)
