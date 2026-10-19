@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/content"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpx"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/segment"
 )
@@ -32,7 +33,9 @@ func (d Deps) segmentFields(w http.ResponseWriter, _ *http.Request) {
 }
 
 type previewResponse struct {
-	Audience    segment.Audience    `json:"audience"`
+	// Audience is counted for both channels: the rule alone does not say
+	// which channels a campaign will use.
+	Audience    segment.Reach       `json:"audience"`
 	Description segment.Description `json:"description"`
 	AsOf        time.Time           `json:"as_of"`
 }
@@ -42,7 +45,8 @@ type validationErrorResponse struct {
 	Details segment.Errors `json:"details"`
 }
 
-// segmentPreview validates a rule and returns its audience size.
+// segmentPreview validates a rule and returns its audience size, per channel,
+// with the people each channel leaves out for lack of consent.
 // 422 carries the structured validation errors.
 func (d Deps) segmentPreview(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRuleBytes))
@@ -74,7 +78,7 @@ func (d Deps) segmentPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, previewResponse{
-		Audience:    audience,
+		Audience:    audience.Reach(content.Channels),
 		Description: segment.Describe(v),
 		AsOf:        asOf,
 	})
