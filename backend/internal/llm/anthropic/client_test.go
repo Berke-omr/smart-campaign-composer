@@ -363,3 +363,36 @@ func TestReplayStreamedDrafts(t *testing.T) {
 		})
 	}
 }
+
+// The recorded real answers also pass the whole generator: validation,
+// states and streamed deltas, not just the client.
+func TestReplayThroughTheGenerator(t *testing.T) {
+	reg := segment.NewRegistry([]string{"İstanbul", "Ankara", "İzmir"})
+	gen := &llm.Generator{Client: testClient(replay(t, "segment_sample_low.json")), AttemptTimeout: 5 * time.Second}
+	res, err := gen.Segment(context.Background(), reg, "brief")
+	if err != nil || res.Attempts != 1 || res.Validated.Len() != 3 || res.CampaignName != "Cart reminder — İstanbul" {
+		t.Fatalf("Segment = %+v, %v", res, err)
+	}
+
+	gen.Client = testClient(replay(t, "sms_sample_low.sse"))
+	var states []string
+	deltas := 0
+	results := gen.Drafts(context.Background(), llm.DraftInput{
+		Brief: "brief", Tone: llm.ToneFriendly, CampaignName: res.CampaignName,
+		Channels: []content.Channel{content.SMS},
+		Longest: map[content.Channel]content.Values{content.SMS: {
+			content.FirstName: "Muhammed Emin", content.LastName: "Montgomery-Fitzgerald", content.City: "İstanbul"}},
+	}, func(e llm.Event) {
+		if e.Type == llm.EventState {
+			states = append(states, string(e.State))
+		} else {
+			deltas++
+		}
+	})
+	if r := results[content.SMS]; r.State != llm.StateValid || r.Report.Lengths[0].WorstCaseLength != 116 {
+		t.Errorf("SMS = %+v", r)
+	}
+	if strings.Join(states, " ") != "writing validating valid" || deltas < 2 {
+		t.Errorf("states %v, %d deltas", states, deltas)
+	}
+}
