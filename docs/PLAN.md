@@ -17,8 +17,8 @@
 |---|---|---|---|
 | P0 | Plan & docs | ✅ done | 2026-10-19 |
 | P1 | Skeleton & infrastructure | ✅ done (PR, branch `feat/p1-skeleton`) | 2026-10-19 |
-| P2 | Segment DSL & audience | ⏳ next | — |
-| P3 | LLM layer | ⬜ | — |
+| P2 | Segment DSL & audience | ✅ done (PR, branch `feat/p2-segment-dsl`) | 2026-10-19 |
+| P3 | LLM layer | ⏳ next | — |
 | P4 | Approval & delivery pipeline | ⬜ | — |
 | P5 | Tracking (SSE, metrics, health) | ⬜ | — |
 | P6 | Frontend | ⬜ | — |
@@ -292,4 +292,50 @@ make test                                        -> exit 0 (7 Go packages ok wit
   upgrade, so it is deferred; nothing from that chain ships in the nginx image.
 
 ### P2
+
+**Correctness of the segment engine:**
+- *Three-way check of the sample brief* (5,000 users, seed 42): compiled rule, hand-written SQL and an
+  independent Go oracle all return **177 users, 99 SMS-reachable, 133 email-reachable**. This is
+  the same number P1 measured by hand, now reproduced through the DSL.
+- *Differential test:* 300 random valid rules on 3,000 users; SQL counts equal the oracle's for
+  every rule, with at least 150 of the 300 rules hitting an audience that is neither empty nor
+  everyone (guards against a test that passes vacuously).
+- *NULL semantics* pinned on hand-made rows (never / 10 days ago / 60 days ago).
+- *Mutation check:* removing the `IS NULL` branch of `not_within_last_days` fails the differential,
+  three-way and NULL tests. The sample brief silently drops from **177 to 74 users** without it.
+
+**Safety of the SQL:**
+- *SQL-shape test:* compiled SQL for 2,000 random rules contains only registry columns, fixed
+  keywords, operators and `$n` placeholders, with exactly one placeholder per argument.
+- *Mutation check:* inlining a value into the SQL (`city = 'Bursa'`) is caught by the shape test
+  and by the per-operator test.
+- *Injection attempts* in field, op, value and match are all rejected by validation, before any SQL.
+- *Fuzzing:* `go test -fuzz=FuzzParseValidateCompile -fuzztime 30s` ran 607,967 executions and
+  found 270 interesting inputs, with no failures. The seed corpus runs in every `make test`.
+
+**Schema for P3:**
+- 12 `anyOf` variants, 4.8 KB with 15 cities.
+- A test asserts it stays inside the Structured Outputs subset (closed objects, every property
+  required, no `$ref` or bounds keywords). Mutation check: adding `minimum` fails it.
+- The schema serializes byte-identically across calls, so the prompt cache stays valid.
+- A JSON Schema validator confirms it accepts 1,000 random valid rules and rejects incompatible
+  combinations (operator not allowed for the field, unknown city, value of the wrong type, extra key).
+
+**Live stack** (`make up`, through nginx):
+```
+POST /api/segments/preview  (sample brief)          -> 200 {"total":177,"sms_reachable":99,"email_reachable":133}
+                                                       + description lines, as_of
+POST /api/segments/preview  ("istanbul", "phone")   -> 422 invalid_value (lists allowed cities) + unknown_field
+POST /api/segments/preview  (no conditions)         -> 200 {"total":5000,"sms_reachable":3156,"email_reachable":3714}, "All users"
+GET  /api/segments/fields                           -> 7 fields, 15 cities from the data (most common first), limits
+api log                                             -> "segment registry ready", cities: 15
+```
+
+**Performance:** `EXPLAIN ANALYZE` of the sample brief: sequential scan over 5,000 rows in
+**1.3 ms**. No indexes added (see DECISIONS.md D9).
+
+**Test suite:** `make test` exit 0. The segment package has 109 tests and subtests, including
+integration tests against Postgres in the container.
+
+### P3
 _pending_
