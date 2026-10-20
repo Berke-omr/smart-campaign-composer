@@ -7,6 +7,7 @@ They show how the problem was approached and how AI output was verified at each 
 |---|---|---|---|
 | 01 | 2026-10-19 | [01-2026-10-19-planning-p0-p2.md](01-2026-10-19-planning-p0-p2.md) | Case analysis, plan and decisions (P0); skeleton and infrastructure (P1); segment DSL and audience counting (P2); design review and P3 kickoff prompt |
 | 02 | 2026-10-19 | [02-2026-10-19-llm-layer-p3.md](02-2026-10-19-llm-layer-p3.md) | LLM layer (P3): structured outputs verified on the real API, mock LLM scenario catalog, content validation, streamed drafts and campaign drafts; post-review fixes (mutation-check record, disconnect test, email latency); P4 kickoff prompt |
+| 03 | 2026-10-19 – 20 | [03-2026-10-19-delivery-p4.md](03-2026-10-19-delivery-p4.md) | Approval and delivery (P4): audience frozen at approval, mock provider with faults and idempotency, rate-limited worker with leases and retries, verified with integration tests, mutation checks and live runs (problems found while verifying: a hung test, clock skew, a 1 s stop timeout); a real-API end-to-end run; the no-emoji rule; P5 kickoff prompt |
 
 ## How the exports are produced
 
