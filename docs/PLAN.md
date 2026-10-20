@@ -555,6 +555,25 @@ The first live run's provider numbers were discarded: `docker compose up -d work
 recreated the mock provider too and wiped its memory mid-campaign. Later runs restart only the worker
 (`docker compose start worker`) and print the provider's start time before and after.
 
+**Real Claude, end to end** (Claude Sonnet 5.5, 3 paid calls, agreed beforehand; `/api/config` checked before the
+first call and set back to mock afterwards):
+```
+POST /api/campaigns (sample brief)   -> 201 in 8.4 s, attempt 1 (102 input / 133 output tokens): the same three
+                                        conditions as the mock scenario; 166 people, 91 SMS + 125 email = 216
+GET  .../draft/stream                 -> 3.2 s, sms and email both "writing1 validating1 valid1"; status ready
+                                        SMS worst case 124 / 160 (it ends with an emoji), subject 61 / 80;
+                                        the email uses {{first_name}} and {{city}}
+POST .../approve (twice)              -> identical 200 bodies {"sms":91,"email":125,"total":216}
+worker                                -> completed 4.8 s after approval: 215 sent, 1 failed (400 invalid recipient);
+                                        230 calls, all logged (10 x 503, 3 x 429, 1 timeout, then sent)
+checks                                -> all 216 deliveries equal the template with the recipient's first name and
+                                        city substituted in SQL (independent of the Go renderer); none still holds
+                                        "{{"; none without consent; longest rendered SMS 124 = the predicted worst
+                                        case; provider accepted 215 = sent, rejected 1, replayed 1 (the timeout)
+```
+The emoji counts as one character in our counter (Unicode characters, A1); on a real SMS network it would force UCS-2
+and take two UTF-16 units. Segment billing stays out of scope.
+
 **Test suite:** `make test` exit 0 (14 Go packages with `-race` against Postgres in containers, Vitest 3 passed).
 The `delivery` package takes about 30 s, most of it the rate, kill and graceful-stop tests.
 
