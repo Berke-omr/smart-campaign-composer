@@ -274,3 +274,49 @@ func TestEmailHTML(t *testing.T) {
 		t.Errorf("unexpected HTML:\n%s", got)
 	}
 }
+
+// TestEmojiAreRejected (D15): no field may carry an emoji or another
+// pictographic symbol; ordinary Turkish text and punctuation pass.
+func TestEmojiAreRejected(t *testing.T) {
+	rejected := map[string]string{
+		"face":                 "Merhaba {{first_name}}, kaçırma 😊",
+		"sparkles":             "✨ Yeni sezon",
+		"star":                 "Sana özel ⭐ fırsat",
+		"check mark":           "Siparişin hazır ✔",
+		"heart with selector":  "Seni seviyoruz ❤️",
+		"flag":                 "Türkiye'ye özel 🇹🇷",
+		"keycap":               "1️⃣ gün kaldı",
+		"zero-width joiner":    "Aile paketi 👨‍👩‍👧",
+		"symbol outside emoji": "Toplam 𝟑𝟎 indirim", // mathematical digits are outside the BMP too
+	}
+	for name, text := range rejected {
+		t.Run(name, func(t *testing.T) {
+			for _, m := range []struct {
+				ch    Channel
+				msg   Message
+				field string
+			}{
+				{SMS, Message{Text: text}, "text"},
+				{Email, Message{Subject: text, Body: "Merhaba"}, "subject"},
+				{Email, Message{Subject: "Merhaba", Body: text}, "body"},
+			} {
+				r := Validate(m.ch, m.msg, sampleLongest)
+				if r.Valid || len(r.Errors) != 1 || r.Errors[0].Code != CodeEmoji || r.Errors[0].Field != m.field {
+					t.Errorf("%s %s %q: %+v", m.ch, m.field, text, r.Errors)
+				}
+			}
+		})
+	}
+
+	allowed := "Merhaba {{first_name}}, %30 indirim! ₺100'ye varan fırsat © ™ – “şimdi” → İzmir, Iğdır, Çanakkale, Ödemiş, Üsküdar…"
+	if r := Validate(SMS, Message{Text: allowed}, sampleLongest); !r.Valid {
+		t.Errorf("plain Turkish text rejected: %+v", r.Errors)
+	}
+
+	// The message names each distinct emoji once; invisible ones by code point.
+	r := Validate(SMS, Message{Text: "Seni seviyoruz ❤️ ❤️ 😊"}, sampleLongest)
+	want := `text contains emoji ("❤", U+FE0F, "😊"); write it without emoji or other pictographic symbols`
+	if len(r.Errors) != 1 || r.Errors[0].Message != want {
+		t.Errorf("message = %+v, want %q", r.Errors, want)
+	}
+}

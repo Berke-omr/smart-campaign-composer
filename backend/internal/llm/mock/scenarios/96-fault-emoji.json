@@ -1,0 +1,12 @@
+{
+  "id": "fault-emoji",
+  "brief": "[test] The first SMS ends with an emoji; the repair removes it.",
+  "channels": ["sms"],
+  "tone": "playful",
+  "segment": [{"answer": {"campaign_name": "Fault test — İstanbul", "rule": {"match": "all", "conditions": [{"field": "city", "op": "eq", "value": "İstanbul"}, {"field": "last_cart_add_at", "op": "within_last_days", "value": 30}]}, "unsupported_criteria": []}}],
+  "sms": [
+    {"answer": {"text": "Merhaba {{first_name}}, sepetindeki ürünler seni bekliyor! %30 indirim seni bekliyor, kaçırma 😊"}},
+    {"answer": {"text": "Merhaba {{first_name}}, sepetindeki ürünler seni bekliyor! %30 indirim seni bekliyor, kaçırma!"}}
+  ],
+  "expect": {"segment": "valid@1", "sms": "valid@2"}
+}

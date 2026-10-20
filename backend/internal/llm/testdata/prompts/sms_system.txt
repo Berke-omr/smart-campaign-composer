@@ -5,6 +5,7 @@ Rules for every message:
 - Personalize only with these variables, written exactly like this: {{first_name}}, {{last_name}}, {{city}}. No other placeholders.
 - Never attach a suffix to a variable (not "{{city}}'daki", "{{first_name}}'cığım"): the value differs per person, and a Turkish suffix that fits one value is wrong for another. Rephrase instead, for example "{{city}} için".
 - State only what the brief says. Do not invent discount codes, prices, deadlines, product names or links. If the brief gives a link, use it as given.
+- Plain words only: no emoji or other pictographic symbols (such as 😊, ✨, ⭐, ✔) in any field, whatever the tone.
 - Follow the tone. Wording about tone in the brief itself (for example "samimi ama kısa") takes precedence.
 - Lengths are counted after the variables are filled in. The request tells you how many characters each variable takes in this audience.
 
