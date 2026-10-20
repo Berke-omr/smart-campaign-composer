@@ -589,6 +589,10 @@ The `delivery` package takes about 30 s, most of it the rate, kill and graceful-
   U+FE0F).
 - Live (mock LLM): an SMS edit ending in 😊 → `422` with code `emoji`; an email subject starting with ✨ → `422`; the
   stored message and the `ready` status are unchanged.
+- *Flaky P4 test found on the way:* `make test` failed once because `TestGracefulStopLeavesNothingClaimed` required a
+  drain under 1 s and measured 1.48 s in the container (no row was left claimed). It now sets a 30 s drain timeout and
+  requires the drain to end within 10 s; senders that stop at once and a drain that waits for the timeout both still
+  fail it. `make test` exit 0 afterwards.
 
 **Deviations from the P4 plan:**
 - Rate limiter: our own spacer instead of `golang.org/x/time/rate` (D4, D24 K6); no new dependency.
