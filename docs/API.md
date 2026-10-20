@@ -209,9 +209,9 @@ Validation of one message, recomputed whenever it is read (D15):
 - The limit is checked against `worst_case_length`: every variable replaced by the longest value among the people **this channel** reaches (`longest_values`). A template that fits them fits every recipient. Show this number in the counter so the UI and the validator agree.
 - `limit` is `0` for the email body (no limit).
 - `sample_user` is fictional; `worst_case` is the longest message anyone can receive.
-- `errors[]`: `{field, code, message}` with `code` one of `empty`, `too_long`, `unknown_variable`, `malformed_variable`, `multiline` (a subject must be one line). Messages are actionable, e.g. `text is 163 characters with the longest values in this audience filled in ({{first_name}} = "Muhammed Emin", 13 characters); the limit is 160. Shorten it by at least 3 characters.`
+- `errors[]`: `{field, code, message}` with `code` one of `empty`, `too_long`, `unknown_variable`, `malformed_variable`, `multiline` (a subject must be one line), `emoji` (no emoji or other pictographic symbols in any field, e.g. `text contains emoji ("😊"); write it without emoji or other pictographic symbols`). Messages are actionable, e.g. `text is 163 characters with the longest values in this audience filled in ({{first_name}} = "Muhammed Emin", 13 characters); the limit is 160. Shorten it by at least 3 characters.`
 
-Content rules: SMS ≤ 160, email subject ≤ 80, body unlimited; variables `{{first_name}}`, `{{last_name}}`, `{{city}}` only, written exactly like that.
+Content rules: SMS ≤ 160, email subject ≤ 80, body unlimited; variables `{{first_name}}`, `{{last_name}}`, `{{city}}` only, written exactly like that; no emoji in any field.
 
 ### `GET /api/campaigns/{id}/draft/stream` (SSE)
 

@@ -577,6 +577,19 @@ and take two UTF-16 units. Segment billing stays out of scope.
 **Test suite:** `make test` exit 0 (14 Go packages with `-race` against Postgres in containers, Vitest 3 passed).
 The `delivery` package takes about 30 s, most of it the rate, kill and graceful-stop tests.
 
+**Follow-up after P4: no emoji** (branch `feat/no-emoji`, DECISIONS.md D15). Prompted by the emoji in the real-API SMS.
+- The content prompts forbid emoji; the validator rejects them in every field with code `emoji`.
+- `TestEmojiAreRejected`: 9 kinds rejected in SMS text, subject and body (face, sparkles, star, check mark, heart with
+  variation selector, flag, keycap, zero-width-joiner family, a mathematical digit outside the BMP); ordinary Turkish
+  text with %, ₺, ©, ™, quotes, dash and arrow passes; the message names each emoji once and invisible ones by code point.
+- New fault scenario `fault-emoji`: `writing1 validating1 fixing2 validating2 valid2`; the repair prompt quotes
+  `text contains emoji ("😊")` (`TestEmojiRepair`).
+- Mutation checks: disabling the check fails 9 subtests, the fault scenario, the repair test and the catalog consistency
+  test; dropping the BMP symbol blocks fails the sparkles, star and check-mark cases (the heart is still caught by its
+  U+FE0F).
+- Live (mock LLM): an SMS edit ending in 😊 → `422` with code `emoji`; an email subject starting with ✨ → `422`; the
+  stored message and the `ready` status are unchanged.
+
 **Deviations from the P4 plan:**
 - Rate limiter: our own spacer instead of `golang.org/x/time/rate` (D4, D24 K6); no new dependency.
 - Idempotency key: a UUID per delivery instead of the delivery id (D5, K8).
