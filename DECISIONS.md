@@ -25,7 +25,7 @@
 | D12 | LLM abstraction and mock LLM | Accepted (catalog location revised in P3) |
 | D13 | Model selection: Claude Sonnet 5.5 | Accepted (effort chosen in P3) |
 | D14 | User data model: profile attributes | Accepted |
-| D15 | Content rules: length, variables, email format | Accepted |
+| D15 | Content rules: length, variables, email format | Accepted (no emoji, after P4) |
 | D16 | Testing strategy | Accepted |
 | D17 | Frontend stack | Accepted (UI library to revisit in P6, see D22) |
 | D18 | Observability endpoints | Accepted |
@@ -348,6 +348,15 @@
   cities, and the worst case counts the fallback if it is longer). Unknown, misspelled or
   space-padded variables are validation errors that name the correct spelling. The prompt also
   forbids Turkish suffixes on variables (`{{city}}'daki` is wrong for İzmir).
+- **No emoji (after P4):** no field may contain an emoji or another pictographic symbol. Claude ended
+  the real-API test's SMS with "😊" without being asked. Most emoji take two UTF-16 units in an SMS
+  while our counter counts one, phones and mail clients render them unevenly, and the brand voice is
+  the marketer's call. The prompt forbids them and the validator rejects them (code `emoji`), so the
+  repair loop removes them and a marketer's edit with one is refused; nothing is stripped silently.
+  The rule is an explicit list: runes outside the Basic Multilingual Plane, U+2600–27BF (☀ ✨ ✔),
+  U+2B00–2BFF (⭐) and the joiners U+FE0F, U+200D, U+20E3; Turkish letters, %, ₺, © and ™ pass.
+  *Possible extension:* an `allow_emoji` choice next to the tone, with the prompt allowing one emoji
+  and SMS length counted in UTF-16 units so the counter stays honest. It needs a UI switch (P6/P8).
 - **Email:** subject (≤ 80, a single line: it becomes a mail header) + plain-text body with no
   limit. The backend wraps it in a simple HTML template. Claude never produces HTML.
 - **Design conflict resolved in favour of this rule (D22):** the design counts the raw template

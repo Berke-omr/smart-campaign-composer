@@ -123,7 +123,7 @@ func TestCatalogCoversEveryFault(t *testing.T) {
 	// PLAN.md P3: one scenario per fault.
 	c := catalog(t)
 	for _, id := range []string{"fault-broken-json", "fault-unknown-field", "fault-long-sms",
-		"fault-unknown-variable", "fault-refusal", "fault-timeout"} {
+		"fault-unknown-variable", "fault-refusal", "fault-timeout", "fault-emoji"} {
 		if _, ok := c.Scenario(id); !ok {
 			t.Errorf("missing scenario %s", id)
 		}

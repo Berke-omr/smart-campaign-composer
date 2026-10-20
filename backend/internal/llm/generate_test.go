@@ -131,6 +131,9 @@ func TestFaultScenarios(t *testing.T) {
 			content.SMS:   "writing1 validating1 valid1",
 			content.Email: "writing1 fixing2 fixing3 needs_manual_edit3",
 		}},
+		{"fault-emoji", map[content.Channel]string{
+			content.SMS: "writing1 validating1 fixing2 validating2 valid2",
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {
@@ -150,6 +153,25 @@ func TestFaultScenarios(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestEmojiRepair: the repair request quotes the emoji the validator found,
+// and the stored answer has none.
+func TestEmojiRepair(t *testing.T) {
+	cat, rec, gen := setup(t, mock.Options{})
+	s := scenario(t, cat, "fault-emoji")
+	results := gen.Drafts(context.Background(), input(s), func(llm.Event) {})
+	reqs := rec.requests(llm.Task(content.SMS))
+	if len(reqs) != 2 || !strings.Contains(reqs[1].Prompt, `text contains emoji ("😊")`) {
+		t.Fatalf("%d SMS requests; the repair does not quote the emoji:\n%s", len(reqs), reqs[len(reqs)-1].Prompt)
+	}
+	if !strings.Contains(reqs[0].System, "no emoji") {
+		t.Error("the system prompt does not forbid emoji")
+	}
+	r := results[content.SMS]
+	if r.State != llm.StateValid || strings.ContainsRune(r.Message.Text, '😊') {
+		t.Errorf("result = %s %q", r.State, r.Message.Text)
 	}
 }
 

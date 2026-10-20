@@ -16,6 +16,7 @@ const (
 	CodeUnknownVariable   ErrorCode = "unknown_variable"
 	CodeMalformedVariable ErrorCode = "malformed_variable"
 	CodeMultiline         ErrorCode = "multiline"
+	CodeEmoji             ErrorCode = "emoji"
 )
 
 // FieldError is one problem in one field ("text", "subject" or "body").
@@ -108,6 +109,10 @@ func Validate(ch Channel, m Message, longest Values) Report {
 			continue
 		}
 		r.Errors = append(r.Errors, errs...)
+		if found := emojiIn(f.value); len(found) > 0 {
+			r.Errors = append(r.Errors, FieldError{Field: f.name, Code: CodeEmoji,
+				Message: fmt.Sprintf("%s contains emoji (%s); write it without emoji or other pictographic symbols", f.name, strings.Join(found, ", "))})
+		}
 		if f.name == "subject" && strings.ContainsAny(f.value, "\r\n") {
 			r.Errors = append(r.Errors, FieldError{Field: f.name, Code: CodeMultiline,
 				Message: "subject must be a single line"})
@@ -143,6 +148,45 @@ func tooLongMessage(f field, fl FieldLength, worst Values) string {
 		msg += " with the longest values in this audience filled in (" + strings.Join(used, "; ") + ")"
 	}
 	return msg + fmt.Sprintf("; the limit is %d. Shorten it by at least %d characters.", f.limit, fl.WorstCaseLength-f.limit)
+}
+
+// isEmoji reports whether r is an emoji or another pictographic symbol.
+// Messages carry none for now (DECISIONS.md D15): on SMS most emoji take two
+// UTF-16 units while our counter counts one, phones and mail clients show
+// them unevenly, and the brief never asks for them. The list is explicit:
+// everything outside the Basic Multilingual Plane (where almost all emoji
+// live), the Miscellaneous Symbols and Dingbats blocks (☀ ✨ ✔), the
+// Miscellaneous Symbols and Arrows block (⭐), and the invisible joiners
+// that build emoji sequences. Turkish letters, %, ₺, © and ™ are not in it.
+func isEmoji(r rune) bool {
+	switch {
+	case r > 0xFFFF:
+		return true
+	case r >= 0x2600 && r <= 0x27BF, r >= 0x2B00 && r <= 0x2BFF:
+		return true
+	case r == 0xFE0F, r == 0x200D, r == 0x20E3: // variation selector, zero-width joiner, keycap
+		return true
+	}
+	return false
+}
+
+// emojiIn lists the distinct emoji in s, quoted; an invisible joiner is
+// shown by its code point so the message says what to delete.
+func emojiIn(s string) []string {
+	var found []string
+	seen := map[rune]bool{}
+	for _, r := range s {
+		if !isEmoji(r) || seen[r] {
+			continue
+		}
+		seen[r] = true
+		if r == 0xFE0F || r == 0x200D || r == 0x20E3 {
+			found = append(found, fmt.Sprintf("U+%04X", r))
+		} else {
+			found = append(found, fmt.Sprintf("%q", string(r)))
+		}
+	}
+	return found
 }
 
 // worstValues picks, for each variable, the longer of the audience's longest

@@ -382,15 +382,20 @@ func TestGracefulStopLeavesNothingClaimed(t *testing.T) {
 	r.campaign(t, 1200, 1200)
 	for i := range 10 {
 		after := 150*time.Millisecond + time.Duration(i)*97*time.Millisecond
+		w := r.worker(time.Second)
+		// A drain that hangs ends only at this timeout. Finishing far below it
+		// shows the worker stopped on its own; how long a normal drain takes
+		// depends on the machine's load (1.5 s seen in the test container).
+		w.DrainTimeout = 30 * time.Second
 		ctx, cancel := context.WithTimeout(context.Background(), after)
 		start := time.Now()
-		r.worker(time.Second).Run(ctx)
+		w.Run(ctx)
 		cancel()
 		if n := r.count(t, `SELECT count(*) FROM deliveries WHERE status = 'sending'`); n != 0 {
 			t.Errorf("stopped after %s: %d rows still claimed", after, n)
 		}
-		if took := time.Since(start) - after; took > time.Second {
-			t.Errorf("draining took %s", took)
+		if took := time.Since(start) - after; took > 10*time.Second {
+			t.Errorf("draining took %s; it should not wait for the drain timeout", took)
 		}
 	}
 	if n := r.count(t, `SELECT count(*) FROM deliveries WHERE status = 'sent'`); n == 0 || n == 2400 {
