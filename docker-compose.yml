@@ -2,8 +2,7 @@
 #
 # Startup order:
 #   postgres (healthy) -> migrate (exits 0) -> seed (exits 0) -> api (healthy) -> frontend
-#                         migrate (exits 0) -> worker
-#   mock-provider starts independently.
+#                         migrate (exits 0) + mock-provider (healthy) -> worker
 
 name: smart-campaign-composer
 
@@ -81,13 +80,25 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # One replica: the 100 messages/second/channel limit is kept in-process (D4).
   worker:
     <<: *backend
     command: ["/app/worker"]
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      PROVIDER_URL: http://mock-provider:8080
+      PROVIDER_TIMEOUT: ${PROVIDER_TIMEOUT:-3s}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-32}
+      WORKER_LEASE: ${WORKER_LEASE:-30s}
     depends_on:
       migrate:
         condition: service_completed_successfully
+      mock-provider:
+        condition: service_healthy
+    # On SIGTERM the worker finishes the calls in hand for up to 8 s. Docker's
+    # grace period before SIGKILL is set here so it does not depend on the
+    # machine's default (it was 1 s on the development machine).
+    stop_grace_period: 10s
     restart: unless-stopped
 
   mock-provider:
@@ -96,6 +107,17 @@ services:
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HTTP_ADDR: ":8080"
+      # Faults (DECISIONS.md D24, K5). Empty values use the provider's defaults:
+      # 20-120 ms latency, 3% 503, 3% 429, 0.5% slow accepts (10 s),
+      # 1% rejected recipients, 100 requests per channel per second.
+      MOCK_LATENCY_MIN: ${MOCK_LATENCY_MIN:-}
+      MOCK_LATENCY_MAX: ${MOCK_LATENCY_MAX:-}
+      MOCK_ERROR_RATE: ${MOCK_ERROR_RATE:-}
+      MOCK_THROTTLE_RATE: ${MOCK_THROTTLE_RATE:-}
+      MOCK_SLOW_RATE: ${MOCK_SLOW_RATE:-}
+      MOCK_SLOW_DELAY: ${MOCK_SLOW_DELAY:-}
+      MOCK_REJECT_RATE: ${MOCK_REJECT_RATE:-}
+      MOCK_RATE_LIMIT: ${MOCK_RATE_LIMIT:-}
     # Only published for debugging; the worker reaches it on the compose network.
     ports:
       - "127.0.0.1:${MOCK_PROVIDER_HOST_PORT:-18090}:8080"

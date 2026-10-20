@@ -1,6 +1,7 @@
 package content
 
 import (
+	"maps"
 	"math/rand/v2"
 	"strings"
 	"testing"
@@ -234,4 +235,42 @@ func FuzzValidate(f *testing.F) {
 			t.Fatalf("valid template rendered with a leftover placeholder: %q", s)
 		}
 	})
+}
+
+func TestLongest(t *testing.T) {
+	got := Longest([]Values{
+		{FirstName: "Ayşe", LastName: "Yılmaz", City: "İzmir"},
+		{FirstName: "Muhammed Emin", LastName: "Öz", City: "İstanbul"},
+		{FirstName: "ŞÖĞÜÇŞÖĞÜÇ", LastName: "Kaya", City: "Ankara"},
+	})
+	// Characters, not bytes: "ŞÖĞÜÇŞÖĞÜÇ" is 10 characters but 20 bytes, so
+	// it loses to "Muhammed Emin" (13 of each). Ties go to the value that
+	// sorts first.
+	want := Values{FirstName: "Muhammed Emin", LastName: "Yılmaz", City: "İstanbul"}
+	if !maps.Equal(got, want) {
+		t.Errorf("Longest = %v, want %v", got, want)
+	}
+	if tie := Longest([]Values{{City: "Bursa"}, {City: "Adana"}}); tie[City] != "Adana" {
+		t.Errorf("tie = %q, want Adana", tie[City])
+	}
+	if empty := Longest(nil); empty[FirstName] != "" || len(empty) != len(Variables) {
+		t.Errorf("Longest(nil) = %v", empty)
+	}
+}
+
+func TestEmailHTML(t *testing.T) {
+	got := EmailHTML("Sepet & indirim", "Merhaba Ayşe,\r\n\r\nSepetindeki <script>alert(1)</script> ürünler\nhâlâ seni bekliyor.\n\n\n%30 indirim!")
+	for _, want := range []string{
+		"<title>Sepet &amp; indirim</title>",
+		"<p>Merhaba Ayşe,</p>",
+		"<p>Sepetindeki &lt;script&gt;alert(1)&lt;/script&gt; ürünler<br>hâlâ seni bekliyor.</p>",
+		"<p>%30 indirim!</p>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("HTML lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "<script>") || strings.Count(got, "<p>") != 3 {
+		t.Errorf("unexpected HTML:\n%s", got)
+	}
 }

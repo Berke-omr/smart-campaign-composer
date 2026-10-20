@@ -1,7 +1,7 @@
 # API contract
 
-> REST and SSE contract of the api service, as built in P3. It is the input for the frontend (P6).
-> Delivery endpoints (approve, send, live dashboard) arrive in P4/P5 and will be added here.
+> REST and SSE contract of the api service, as built in P3 and P4. It is the input for the frontend (P6).
+> The live dashboard stream arrives in P5 and will be added here.
 > Rationale: [`DECISIONS.md`](../DECISIONS.md). Examples below are real responses from the mock LLM.
 
 ## Conventions
@@ -15,10 +15,11 @@
   | Status | Body | When |
   |---|---|---|
   | `404` | `{"error": "campaign not found"}` | unknown id or channel |
-  | `409` | `{"error": "..."}` | content is locked, or drafts are already being written |
+  | `409` | `{"error": "..."}` | content is locked, drafts are already being written, or the campaign is not ready to approve |
   | `413` | `{"error": "request body is too large"}` | body over 64 KB |
   | `422` | `{"error": "...", "details": ["...", ...]}` | invalid input; `details` lists every problem |
   | `422` | `{"error": "invalid content", "report": {...}}` | an edited message failed validation (see [Report](#report)) |
+  | `422` | `{"error": "...", "channel": "sms", "report": {...}}` | at approval, a message no longer fits the audience |
   | `500` | `{"error": "internal error"}` | details are logged, never returned |
 
 ## LLM mode
@@ -92,11 +93,13 @@ Body: a segment rule (`{"match": "all"|"any", "conditions": [...]}`, D9). Respon
 |---|---|---|
 | `draft` | Draft | being drafted, or a selected channel has no valid message |
 | `ready` | Ready | every selected channel has a valid message; can be approved (P4) |
-| `sending` | Sending | approved, messages are going out (P4) |
-| `completed` | Completed | every message is final (P4) |
-| `failed` | Failed | sending could not run (P4) |
+| `sending` | Sending | approved; messages are going out |
+| `completed` | Completed | every message is final and at least one was sent; some may have failed |
+| `failed` | Failed | every message is final and none could be delivered |
 
-`draft` and `ready` move automatically as messages are stored. From `sending` on, content is locked (`409`).
+`draft` and `ready` move automatically as messages are stored. `POST …/approve` moves `ready` to `sending`; the
+worker moves `sending` to `completed` or `failed` once no message is queued, sending or retrying. One failed message
+never makes a campaign Failed. From `sending` on, content is locked (`409`).
 
 ### `POST /api/campaigns`
 
@@ -153,6 +156,8 @@ The [campaign view](#campaign-view).
   "as_of": "2026-10-19T17:32:22.85917Z",
   "llm": {"mode": "mock", "model": null},
   "messages": {"sms": null, "email": null},
+  "approved_at": null,
+  "finished_at": null,
   "created_at": "...", "updated_at": "..."
 }
 ```
@@ -160,6 +165,10 @@ The [campaign view](#campaign-view).
 - `unsupported_criteria`: parts of the brief no field can express (e.g. `["kadın kullanıcılar"]`). Show them as a warning; they were **not** applied.
 - `as_of`: anchor of "in the last N days". Counts and longest values stay the same for the life of the draft.
 - `messages.<channel>`: `null` until drafted, then a [message view](#message-view).
+- `approved_at`: when sending started (the dashboard's "Started 14:32:05"); `null` before approval. `finished_at`: when the
+  campaign became `completed` or `failed`.
+- The confirm-send modal needs nothing else: title, condition lines, people, reachable and excluded per channel,
+  `channel_messages` (selected channels only) and each channel's message with its preview are all in this view.
 
 ### Message view
 
@@ -275,6 +284,93 @@ Replaces a channel's message with the marketer's version. It goes through the sa
 - `422` `{"error": "invalid content", "report": {...}}`: the edit is rejected and the stored message is left unchanged.
 - `422` when SMS fields are sent for email or the other way round; `409` once the campaign has left `draft`/`ready`.
 
+### `POST /api/campaigns/{id}/approve`
+
+Approves a `ready` campaign and starts sending. No request body. In one transaction the backend
+(DECISIONS.md D24):
+
+1. locks the campaign, so approvals and edits of one campaign run one after the other;
+2. reads everyone each selected channel reaches (consent **and** contact data) at the campaign's `as_of`, the same anchor
+   as the counts the marketer confirmed;
+3. validates each message again against the longest names of exactly these people;
+4. renders the message for each person (variables filled in) and stores one delivery per person and channel;
+5. moves the campaign to `sending`.
+
+`200`:
+
+```json
+{"campaign_id": 3, "status": "sending", "approved_at": "2026-10-19T20:48:20.140645Z",
+ "deliveries": {"sms": 98, "email": 131, "total": 229}}
+```
+
+- **Idempotent:** approving again (a double click, a retried request, ten at once) returns the same body and writes
+  nothing. Later it reports the current status (`completed` / `failed`) with the same counts.
+- `409` `{"error": "campaign is not ready to send: every selected channel needs a valid message"}`: the campaign is a draft.
+- `422` `{"error": "no one in this audience can be reached on the selected channels"}`: nothing would be sent. The campaign
+  stays `ready`.
+- `422` `{"error": "the sms message no longer fits this audience; edit it and approve again", "channel": "sms",
+  "report": {...}}`: someone whose name makes the message too long joined the audience after it was validated. Nothing
+  was written; the campaign stays `ready`. The [report](#report) has the new longest values.
+- `404` for an unknown campaign. Afterwards the content is locked: edits and draft streams answer `409`.
+
+### Message states
+
+Each person–channel pair is one delivery. The worker sends at most 100 per second per channel and retries per
+DECISIONS.md D6.
+
+| Code | UI label | Meaning |
+|---|---|---|
+| `queued` | Queued | waiting for its first attempt |
+| `sending` | Sending | claimed by the worker: being sent, or about to be (within a fraction of a second) |
+| `sent` | Sent | the provider accepted it |
+| `retrying` | Retrying | the last attempt failed in a way that may pass (5xx, timeout, network, 429); a new one is scheduled |
+| `failed` | Failed | the provider rejected it (other 4xx), or its attempts ran out (5 errors, or 10 answers of 429) |
+
+Every provider call is logged in `delivery_attempts` (attempt number, `started_at`, `finished_at`, HTTP status or none
+for a timeout, outcome `sent` / `retry` / `failed`, error, the provider's `Retry-After`, and when the retry is due). P5's
+"Recent issues" and sends-per-second chart read it; an entry reads like `429 provider busy, retrying in 2.1s` or
+`no answer within 3s, retrying in 1.5s`.
+
+## Mock SMS/email provider
+
+The worker sends to a fake provider (`mock-provider`, published on `127.0.0.1:18090` for debugging only). It behaves
+like a real one: slow at times, failing, throttling, rejecting some recipients.
+
+| Request | Body |
+|---|---|
+| `POST /v1/sms` | `{"to": "+905…", "text": "…"}` |
+| `POST /v1/email` | `{"to": "…", "subject": "…", "text": "…", "html": "…"}` (the worker wraps the plain text in HTML) |
+| `GET /stats` | counters per channel (below) |
+| `GET /healthz` | `{"status": "ok"}` |
+
+| Answer to a send | The worker's reaction (D6) |
+|---|---|
+| `202 {"id": "msg_000123", "status": "accepted"}` | `sent` |
+| `429 {"error": "provider busy"}` or `{"error": "rate limit exceeded"}`, `Retry-After: <seconds>` | retry after `Retry-After` (+ up to 0.5 s) |
+| `503 {"error": "service unavailable"}`, a timeout, a network error | retry with full-jitter backoff (up to 1, 2, 4, 8 s) |
+| `400 {"error": "invalid recipient"}` (also a missing key or a bad body) | `failed`, never retried |
+
+- **`Idempotency-Key` is required.** An accepted message or a rejection is stored under the key: a repeated key gets
+  the original answer with `Idempotent-Replayed: true` and never makes a second message. A `503` or `429` is not
+  stored; the provider did not take the message, so a retry is processed again. The worker sends the delivery's UUID.
+- `GET /stats` returns per channel: `received`, `accepted`, `replayed`, `rejected`, `errors`, `throttled` (random 429),
+  `limited` (429 from its rate limit), `slow`, and `peak_per_second` (most requests in any 1 s window: an independent
+  check of the worker's limit). Everything is in memory; a restart forgets it.
+
+Settings (environment of `mock-provider`; empty means the default):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MOCK_LATENCY_MIN` / `MOCK_LATENCY_MAX` | `20ms` / `120ms` | uniform latency per request |
+| `MOCK_ERROR_RATE` | `0.03` | share of requests answered `503` |
+| `MOCK_THROTTLE_RATE` | `0.03` | share answered `429` with `Retry-After` 1–2 s |
+| `MOCK_SLOW_RATE` / `MOCK_SLOW_DELAY` | `0.005` / `10s` | accepted at once but answered after the delay, past the worker's timeout |
+| `MOCK_REJECT_RATE` | `0.01` | share of recipients rejected, decided by a hash of the address (always the same ones) |
+| `MOCK_RATE_LIMIT` | `100` | requests per channel in any 1 s window before `429`; `0` turns it off |
+
+The worker's own settings: `PROVIDER_URL` (`http://mock-provider:8080`), `PROVIDER_TIMEOUT` (`3s`, one call),
+`WORKER_CONCURRENCY` (`32` calls in flight per channel), `WORKER_LEASE` (`30s`, at least twice the timeout).
+
 ## Try it
 
 ```bash
@@ -282,4 +378,6 @@ curl -s localhost:8080/api/briefs/examples
 curl -s -X POST localhost:8080/api/campaigns -H 'Content-Type: application/json' \
   -d '{"brief":"Son 30 günde sepetine ürün ekleyip alışveriş yapmayan İstanbul'\''daki kullanıcılara %30 indirim hatırlatması gönder. Samimi ama kısa olsun.","channels":["sms","email"],"tone":"friendly"}'
 curl -N localhost:8080/api/campaigns/1/draft/stream
+curl -s -X POST localhost:8080/api/campaigns/1/approve
+curl -s localhost:18090/stats
 ```

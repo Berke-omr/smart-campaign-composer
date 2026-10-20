@@ -19,8 +19,8 @@
 | P1 | Skeleton & infrastructure | ✅ done (PR, branch `feat/p1-skeleton`) | 2026-10-19 |
 | P2 | Segment DSL & audience | ✅ done (PR, branch `feat/p2-segment-dsl`) | 2026-10-19 |
 | P3 | LLM layer | ✅ done (PR, branch `feat/p3-llm`) | 2026-10-19 |
-| P4 | Approval & delivery pipeline | ⏳ next | — |
-| P5 | Tracking (SSE, metrics, health) | ⬜ | — |
+| P4 | Approval & delivery pipeline | ✅ done (PR, branch `feat/p4-delivery`) | 2026-10-20 |
+| P5 | Tracking (SSE, metrics, health) | ⏳ next | — |
 | P6 | Frontend | ⬜ | — |
 | P7 | Hardening & submission | ⬜ | — |
 | P8 | Bonus (optional) | ⬜ | — |
@@ -469,3 +469,117 @@ with the clock. Tests pin `asOf` and still get 177 / 99 / 133.
   instead of `draft.validated` / `draft.invalid` / `draft.repairing` (decision K6, D23).
 - The mock scenario catalog lives in `internal/llm/mock/scenarios/` (embedded), not `testdata/` (K5).
 - A refusal is retried once within the 3 attempts, instead of never (decided after smoke test A, D23).
+
+### P4
+
+All integration tests run against real Postgres (`-race`). Timing-dependent tests were repeated: the
+`delivery` package five times in a row, 100 of 100 test runs passed.
+
+**Done criteria:**
+
+| Criterion | Test | Result |
+|---|---|---|
+| Approving twice creates one set of deliveries | `TestConcurrentApprovalsCreateOneSet` (10 concurrent approvals, then one more) | one set of 232, every caller gets the same answer |
+| Provider accepts, the answer times out, retry, exactly one message | `TestAnswerLostAfterAccept` | provider holds 1 message, 1 slow answer + 1 replay; log `retry  no answer within 200ms \| sent Accepted` |
+| ≤ 100 sends per channel in any half-open 1 s window | `TestRateLimitPerChannel` (400 + 400, instant provider), `TestSpacerHoldsTheLimitInEveryWindow` | busiest window 93–97 per channel on `started_at` on the Mac, 92–93 in the Linux test container, the same at the provider; 300 sends from 32 goroutines take ≥ 2.99 s and are ≥ 10 ms apart |
+| Worker killed mid-campaign and restarted: every delivery ends exactly once, none lost | `TestWorkerKilledMidCampaign` (worker in a child process, SIGKILL at ~200 sent with ~60 rows claimed, second process) | 1,000 of 1,000 final, one final attempt row each, one provider message per key; 0–6 replays per run |
+| No message on a channel without consent | `TestApprovalFreezesTheAudience`, `TestRecipientsMatchOracle` (100 random rules), `TestSampleCampaignEndToEnd` | deliveries = preview (99 + 133); every provider message traces back to a consenting user |
+
+**Other evidence:**
+- *End to end:* the sample brief drafted with the mock LLM, approved and sent through a provider with
+  5% 503, 5% 429, 2% slow accepts, 2% rejections and its own limit: 228 sent, 4 failed (the 4
+  rejected recipients), campaign `completed`, every call logged.
+- *Retry matrix* (`TestRetryMatrix`, scripted per recipient): 503 then OK → sent after 2; four 503s then
+  OK → sent after 5; always 503 → failed after 5; 400 → failed after 1; one 429 → sent, Retry-After and
+  retry time logged; always 429 → failed after 10; six 429s, four 503s, then OK → sent on call 11 (K7).
+- *Approval re-validation:* a user with an 80-character name added after drafting → `422` with the SMS
+  report, nothing written, campaign stays `ready`.
+- *Rendering:* every one of the 232 deliveries equals the template rendered with its recipient's data;
+  `content.EmailHTML` escapes `<script>`.
+
+**Mutation checks.** Each mutant compiled, the named tests failed, and the file was restored and
+compared with its backup (`cmp`) afterwards. A scratch script refused to continue if the replacement
+did not apply exactly once or the mutant did not build.
+
+| Mutation | Caught by |
+|---|---|
+| SMS length CHECK dropped from `deliveries` | `TestDeliveryConstraints/SMS_of_161_characters` |
+| Approval reads the campaign without the row lock | `TestConcurrentApprovalsCreateOneSet` (unique key violation) |
+| SMS recipients without the consent check | `TestRecipientsMatchOracle` (2,747 vs 1,847), 4 approval tests (159 SMS instead of 99) |
+| Approval skips the re-validation | `TestApprovalRevalidatesAgainstTheFrozenAudience` (the DB CHECK rejects the row instead: 500, not 422) |
+| Provider does not store accepted answers | 3 provider tests |
+| Provider stores a 503 as a final answer | `TestFailuresAreNotStored` |
+| Limiter interval 9 ms | `TestSpacerHoldsTheLimitInEveryWindow` (102 in one window) |
+| A 400 is retried | `TestRetryPolicy/400_fails_at_once` |
+| A 429 uses up an error attempt | `TestRetryPolicy/4_errors_after_6_429s_still_retry` |
+| A new Idempotency-Key on every call | 7 tests, including the end-to-end and kill tests |
+| Claim without `FOR UPDATE SKIP LOCKED` | `TestClaimTakesDisjointRows` (a row claimed 4 times) |
+| Claim ignores expired leases | 3 tests; the kill test ends with `sending=60 sent=940` |
+| Finish without the attempt fence | `TestStaleClaimCannotFinish` |
+| A campaign with nothing sent ends `completed` | `TestCampaignOutcome` |
+| Senders stop at once on SIGTERM (no drain) | `TestGracefulStopLeavesNothingClaimed`, every run |
+| Claim cancelled by the stop signal | `TestGracefulStopLeavesNothingClaimed`, 3 of 5 runs (timing-dependent race) |
+
+*Invalid first attempt:* the first run of the row-lock mutation had a wrong backup path; `cp` failed,
+the `&&` chain skipped the edit, and `go test` printed `ok` for the intact code. It was not counted. The
+scratch script above was written after it.
+
+**Problems found while verifying, and fixed:**
+- *A test hung for 5 minutes:* Go's HTTP server notices a client that left only after the request body
+  has been read. A test handler that never read the body was never cancelled. The mock provider had the
+  same blind spot (a slow answer kept waiting after the worker gave up); both now read to the end.
+- *A flaky retry-time check (2 of 5 runs):* `next_attempt_at` came from Postgres's `now()` while
+  `finished_at` came from Go. Measured: the database clock is 1.77 ms behind the host under Docker on a
+  Mac. The retry time is now computed from the Go clock; 20 of 20 runs pass.
+- *A row left in `sending` after a graceful stop (live):* two causes. A stop arriving during a claim
+  query cancelled it although its update could already have leased rows; the claim now completes
+  (commit `fix(worker)`). And the worker never stopped gracefully on this machine: it exited with
+  `137` after about a second because every container had `StopTimeout=1`. The compose file now gives
+  the worker `stop_grace_period: 10s`. Afterwards: SIGTERM mid-campaign → exit 0, `worker stopped`,
+  no row left in `sending`.
+
+**Live stack** (`LLM_PROVIDER=mock`; `/api/config` checked before each run, so no paid call):
+```
+POST /approve on a draft                     -> 409 not ready
+POST /approve twice (sample brief)           -> identical 200 bodies {"sms":98,"email":131,"total":229}; preview 98/131/229
+PUT  /messages/sms after approval            -> 409
+worker started later                         -> campaign 4: 228 sent, 1 failed (400 invalid recipient), completed in ~5 s
+Weekend sale (3,714 emails), SIGTERM after 8 s, restart, SIGKILL after 8 s, restart:
+  deliveries                                 -> 3,683 sent, 31 failed; one final attempt row each
+  provider (delta, not restarted)            -> accepted 3,683 = sent, rejected 31 = failed, replayed 22 = slow answers 22
+  busiest half-open second                   -> 94 calls (started_at) and 94 at the provider; steady 90-92/s
+  calls started vs logged                    -> 4,049 vs 3,997: the 52 rows claimed at the SIGKILL
+  recent issues (attempt log)                -> "429 provider busy, retry in 2.1s", "no answer within 3s, retry in 1.5s"
+```
+The first live run's provider numbers were discarded: `docker compose up -d worker` after the SIGKILL
+recreated the mock provider too and wiped its memory mid-campaign. Later runs restart only the worker
+(`docker compose start worker`) and print the provider's start time before and after.
+
+**Real Claude, end to end** (Claude Sonnet 5.5, 3 paid calls, agreed beforehand; `/api/config` checked before the
+first call and set back to mock afterwards):
+```
+POST /api/campaigns (sample brief)   -> 201 in 8.4 s, attempt 1 (102 input / 133 output tokens): the same three
+                                        conditions as the mock scenario; 166 people, 91 SMS + 125 email = 216
+GET  .../draft/stream                 -> 3.2 s, sms and email both "writing1 validating1 valid1"; status ready
+                                        SMS worst case 124 / 160 (it ends with an emoji), subject 61 / 80;
+                                        the email uses {{first_name}} and {{city}}
+POST .../approve (twice)              -> identical 200 bodies {"sms":91,"email":125,"total":216}
+worker                                -> completed 4.8 s after approval: 215 sent, 1 failed (400 invalid recipient);
+                                        230 calls, all logged (10 x 503, 3 x 429, 1 timeout, then sent)
+checks                                -> all 216 deliveries equal the template with the recipient's first name and
+                                        city substituted in SQL (independent of the Go renderer); none still holds
+                                        "{{"; none without consent; longest rendered SMS 124 = the predicted worst
+                                        case; provider accepted 215 = sent, rejected 1, replayed 1 (the timeout)
+```
+The emoji counts as one character in our counter (Unicode characters, A1); on a real SMS network it would force UCS-2
+and take two UTF-16 units. Segment billing stays out of scope.
+
+**Test suite:** `make test` exit 0 (14 Go packages with `-race` against Postgres in containers, Vitest 3 passed).
+The `delivery` package takes about 30 s, most of it the rate, kill and graceful-stop tests.
+
+**Deviations from the P4 plan:**
+- Rate limiter: our own spacer instead of `golang.org/x/time/rate` (D4, D24 K6); no new dependency.
+- Idempotency key: a UUID per delivery instead of the delivery id (D5, K8).
+- 429s have their own budget of 10 instead of counting among the 5 attempts (D6, K7).
+- `make reseed` now also empties campaigns (K9).
+- Estimate: about 10 h instead of 8 h.

@@ -158,6 +158,27 @@ func worstValues(longest Values) Values {
 	return w
 }
 
+// Longest returns, for each variable, the longest value among vs, counted in
+// characters; ties go to the value that sorts first, so the result is
+// deterministic. It measures a set of recipients already in hand (the
+// approval) the way segment.Counter.LongestValues measures an audience in
+// the database.
+func Longest(vs []Values) Values {
+	out := Values{}
+	for _, v := range Variables {
+		best, bestLen := "", 0
+		for _, vals := range vs {
+			s := vals[v]
+			n := utf8.RuneCountInString(s)
+			if n > bestLen || (n == bestLen && s < best) {
+				best, bestLen = s, n
+			}
+		}
+		out[v] = best
+	}
+	return out
+}
+
 // SampleUser is the fictional person previews are rendered for. The city is
 // taken from the audience so the preview reads naturally.
 func SampleUser(longest Values) Values {

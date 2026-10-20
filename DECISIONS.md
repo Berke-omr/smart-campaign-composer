@@ -11,12 +11,12 @@
 
 | # | Decision | Status |
 |---|---|---|
-| D1 | Backend language: Go | Accepted |
+| D1 | Backend language: Go | Accepted (limiter library dropped in P4) |
 | D2 | Database: PostgreSQL | Accepted |
-| D3 | Queue: Postgres `deliveries` table with `SKIP LOCKED` | Accepted |
-| D4 | Rate limiting: per-channel token bucket, burst 1 | Accepted |
-| D5 | Exactly-once effect: unique constraint + provider idempotency key | Accepted |
-| D6 | Retry policy | Accepted |
+| D3 | Queue: Postgres `deliveries` table with `SKIP LOCKED` | Accepted (built in P4) |
+| D4 | Rate limiting: per channel, at most one send per 10 ms | Accepted (revised in P4: own spacer, not a token bucket) |
+| D5 | Exactly-once effect: unique constraint + provider idempotency key | Accepted (key is a UUID, P4) |
+| D6 | Retry policy | Accepted (429 budget added in P4) |
 | D7 | Live updates: SSE with periodic snapshots | Accepted |
 | D8 | Claude structured output: `output_config.format` | Accepted (verified in P3) |
 | D9 | Segment rule: flat, whitelisted JSON DSL | Accepted |
@@ -34,6 +34,7 @@
 | D21 | How the segment engine is verified | Accepted (P2) |
 | D22 | Design reference: visual only; adopted additions | Accepted (before P3) |
 | D23 | LLM layer as built (P3) | Accepted (P3) |
+| D24 | Approval and delivery as built (P4) | Accepted (P4) |
 
 ---
 
@@ -43,7 +44,8 @@
 - **Decision:** Go.
 - **Why:** The system is dominated by concurrent, long-running work: a queue worker with
   per-channel rate limits, and long-lived SSE connections. Go covers these with the standard library
-  (goroutines, `net/http`) plus `golang.org/x/time/rate`. There is an official Anthropic Go SDK.
+  (goroutines, `net/http`); the rate limiter is a few lines of our own (P4, D24 K6). There is an
+  official Anthropic Go SDK.
   A single static binary keeps images small. Go code is explicit, which matters because every part
   must be explainable in the review call.
 - **Trade-off:** Laravel would give queues, migrations and validation out of the box and faster
@@ -76,19 +78,32 @@
   - **One source of truth:** the dashboard aggregates from the same table.
   - **Cheap scheduled sending:** the B1 bonus is just `next_attempt_at` in the future.
   - **Enough capacity:** peak load is 2 channels × 100 msg/s, well within Postgres' range.
+- **As built (P4):** besides those columns, each row holds the recipient's address and the message
+  rendered for them at approval (D24 K2), a UUID idempotency key (D5), `throttled` (429 answers, D6)
+  and the provider's message id. `attempts` is incremented when a worker claims the row, so a call
+  cut short by a crash still counts, and it fences a claim whose lease ran out (D24). One row per
+  provider call goes to `delivery_attempts`.
 - **Trade-off:** We write the lease/retry logic ourselves (small and fully testable). At real
   Insider scale (millions per minute), a dedicated broker (Kafka/SQS) would replace this. The
   `delivery` package hides the claim logic behind an interface to keep that migration contained.
   River (a Postgres-native Go job library) was considered. We rejected it because a job per message
   would duplicate state already held in `deliveries`.
 
-## D4 — Rate limiting: per-channel token bucket, burst 1
+## D4 — Rate limiting: per channel, at most one send per 10 ms
 
-- **Decision:** One limiter per channel in the worker process: 100 tokens/s, **burst 1**. A
-  per-channel worker pool keeps enough requests in flight to reach the rate despite provider latency.
-- **Why burst 1:** With burst *b*, a token bucket allows up to *b* + 100 sends in a 1-second window.
-  With burst 100 that is ~200, which violates "at most 100 per second". Burst 1 spaces sends
-  ≥ 10 ms apart, so any half-open 1 s window holds at most 100. A test measures this.
+- **Decision:** One limiter per channel in the worker process, letting one send through at a time and
+  never sooner than **10 ms after the previous one** (100/s with no burst). A per-channel worker pool
+  keeps enough requests in flight to reach the rate despite provider latency.
+- **Why no burst:** With burst *b*, a token bucket allows up to *b* + 100 sends in a 1-second window.
+  With burst 100 that is ~200, which violates "at most 100 per second". Spacing sends ≥ 10 ms apart
+  means 101 sends span at least a second, so any half-open 1 s window holds at most 100.
+- **Revised in P4 (D24 K6):** the plan was `golang.org/x/time/rate` with burst 1. Its guarantee is on
+  *reservations*: when it is saturated they are exactly 10 ms apart, and a goroutine that wakes late
+  can land next to one that wakes on time, so the measured send times can put 101 in a window. We use a
+  small spacer of our own instead: it takes the timestamp **after** waiting and spaces the next send
+  from that. The same timestamp is stored as the call's `started_at`, so the bound holds for exactly
+  the times the dashboard charts, and the test asserts it on them. Cost: the real rate is a little
+  under 100/s (timer overshoot; 90–97/s measured), and no new dependency.
 - **Trade-off:** The limit is enforced inside a single worker process. Running several worker
   replicas would need a shared limiter (Redis or a Postgres token table). That is documented, not
   built. Network jitter can make the provider observe small bursts; the provider's 429 plus our
@@ -100,8 +115,11 @@
   - **Layer 1 (our side):** `UNIQUE (campaign_id, user_id, channel)` on `deliveries`. Approval is a
     conditional update (`… WHERE status = 'ready'`), so double clicks or concurrent requests create
     one set of deliveries.
-  - **Layer 2 (provider side):** every send carries `Idempotency-Key: <delivery id>`. The mock
-    provider stores seen keys and returns the original result for repeats.
+  - **Layer 2 (provider side):** every send carries `Idempotency-Key: <the delivery's UUID>`. The
+    mock provider stores seen keys and returns the original result for repeats. *(Revised in P4: the
+    plan said the delivery id. Ids restart after a reseed or a clean install while a provider still
+    remembers the keys it saw, so a new delivery could get an old message's answer and be silently
+    dropped. A UUID per row is unique for good.)*
 - **Why:** The queue is at-least-once by nature. A worker can crash, or a request can time out
   after the provider accepted it. At-least-once delivery plus an idempotent receiver gives an
   exactly-once *effect*. Layer 1 alone would not cover the "accepted but response lost" case.
@@ -112,13 +130,19 @@
 | Outcome | Action |
 |---|---|
 | 2xx | `sent` |
-| 429 | Wait `Retry-After` (+ jitter), retry; does not trip permanent failure |
+| 429 | Wait `Retry-After` (+ up to 0.5 s jitter), retry; does not use up the attempts for errors |
 | 5xx, timeout, connection error | Exponential backoff with full jitter (base 1 s, cap 60 s), retry |
 | Other 4xx (e.g. invalid recipient) | `failed` immediately; retrying cannot help |
-| Max attempts reached (5) | `failed`, with `last_error` kept for the dashboard |
+| 5 attempts that ended in an error | `failed`, with `last_error` kept for the dashboard |
+| 10 answers of 429 | `failed` (P4: so that every delivery ends, D24 K7) |
 
 - **Why full jitter:** It avoids retry storms where every failed message retries at the same instant
   and causes another wave of 429s.
+- **429 has its own budget (P4, K7):** a 429 is the provider asking us to slow down, not a fault of the
+  message. Counting it among the 5 attempts would fail healthy messages under throttling; not counting
+  it at all could leave a campaign sending forever. A crash during a call counts as an error attempt.
+- **Note:** with 5 attempts the backoff windows are 1, 2, 4 and 8 s, so the 60 s cap only matters if
+  the attempt count is raised. Retry-After is capped at 60 s too.
 
 ## D7 — Live updates: SSE with periodic snapshots
 
@@ -315,7 +339,9 @@
   GSM-7/UCS-2 segment accounting is out of scope (A1).
 - **Worst case:** templates are validated with each variable replaced by the longest value present
   in the target audience. The audience is frozen at approval, so no rendered message can exceed the
-  limit. *(P3:)* the longest values are taken per channel, among the people that channel reaches;
+  limit. *(P4:)* the approval validates each message again against the longest values of exactly the
+  people being frozen, and renders it for each of them; the `deliveries` table then refuses any
+  rendered SMS over 160 or subject over 80 characters (a CHECK), so the limit is a database invariant. *(P3:)* the longest values are taken per channel, among the people that channel reaches;
   Postgres `char_length` and Go's rune count agree, which a test checks on the whole seed.
 - **Variables:** whitelist `{{first_name}}`, `{{last_name}}`, `{{city}}`, each with a fallback value
   for empty data (`Müşterimiz` for a first name; the users table already forbids empty names and
@@ -460,6 +486,39 @@ Verification log → P3.
   headers and the first text arrive together, with no thinking, so the wait is on the API side before
   the response starts. No change; the per-attempt timeout covers a slow start (PLAN.md, P3 follow-up).
 
+## D24 — Approval and delivery as built (P4)
+
+Decisions taken at the start of P4 (K1–K9). Evidence: PLAN.md → Verification log → P4.
+
+| # | Topic | Decision | Why |
+|---|---|---|---|
+| K1 | Approval anchor | Count and freeze the audience at the campaign's `audience_as_of`, the anchor of the preview; inside the approval transaction, validate every message again against the longest values of exactly the frozen people | What the marketer confirmed is what is sent (D9 already planned this). Approving at "now" changes the numbers just because time passed (the live 177 → 175). The users table changes only on a reseed, and the re-validation catches that |
+| K2 | Render time | At approval, in the same transaction: each delivery stores the recipient's address and the rendered text; the email's HTML is built at send time from the stored text | D15's limit becomes a CHECK on every row; the worker needs no join or template logic; the ledger shows exactly what was sent. Cost: data and consent are frozen at approval (no re-check before each send) |
+| K3 | Worker topology | One process; per channel one claimer (10-row buffer), 32 senders and one limiter | A slow or failing channel never holds up the other; "Sending" stays close to what is really in flight. One replica, because the limit is in-process (D4) |
+| K4 | Completed / Failed | When every delivery is final: `completed` if at least one was sent, `failed` if none was. Approving with nobody reachable is refused (`422`) | The design: one failed message never fails a campaign. A threshold would be an arbitrary number; "failed only on a system error" would never happen, since approval is atomic |
+| K5 | Mock provider defaults | 20–120 ms latency, 3% 503, 3% 429 (Retry-After 1–2 s), 0.5% slow accepts (10 s), 1% rejected recipients (by address hash), 100 requests per channel per second | The case asks for errors, latency and 429s now and then. On the sample campaign that is about 7 + 7 errors, one timeout and two rejections: retries are visible, the campaign still completes |
+| K6 | Rate limiter | Own spacer, no `x/time/rate` | See D4 |
+| K7 | 429 budget | 429s do not use up the 5 attempts for errors; their own budget is 10 | See D6 |
+| K8 | Idempotency key | A UUID per delivery, not its id | See D5 |
+| K9 | Reseed | `make reseed` empties users **and** campaigns (`TRUNCATE … CASCADE`) | Deliveries reference users: truncating users alone fails, and reused ids would point old deliveries at new people |
+
+- **Approval:** one transaction locks the campaign row (the same lock message saves take), reads
+  the reachable people per channel, re-validates, renders, inserts with `COPY` and moves the campaign
+  to `sending` with a conditional update. A second approval waits for the lock, finds `sending` and
+  returns the same answer; `UNIQUE (campaign_id, user_id, channel)` is the backstop.
+- **Claim and lease:** a claim takes due rows and rows whose 30 s lease ran out, with
+  `FOR UPDATE SKIP LOCKED`, and increments `attempts`. Finishing a call writes the attempt row and the
+  new state in one transaction, fenced by that attempt number, so a worker whose lease ran out cannot
+  overwrite a newer claim; its duplicate call is absorbed by the provider's key check (D5).
+- **Clocks:** `started_at` is the limiter's moment and `next_attempt_at` is computed from the same Go
+  clock. The database's clock was 1.8 ms behind the host under Docker on a Mac; computing the retry
+  time there made the log's "retrying in 2s" inconsistent (found by a flaky test, see PLAN.md).
+- **Stopping:** on SIGTERM the worker stops claiming, finishes what it holds (up to 8 s) and exits;
+  the compose file gives it a 10 s grace period, because the development machine's default was 1 s
+  and Docker killed it mid-drain. After a SIGKILL the lease brings the rows back.
+- **Completion:** a periodic sweep finishes campaigns with no queued, sending or retrying rows, so a
+  crash between a delivery's last call and the check only delays it.
+
 ---
 
 ## Assumptions
@@ -494,4 +553,6 @@ Resolved for now with working assumptions; revisit before submission.
 
 Authentication and multi-tenancy · delivery-receipt webhooks · quiet hours and frequency capping ·
 GSM-7/UCS-2 segment billing · horizontal scaling of the worker (shared rate limiter) ·
-field-to-field segment conditions.
+field-to-field segment conditions · re-checking consent between approval and send (the audience is
+frozen at approval) · pausing or cancelling a campaign that is sending · a mock provider that
+remembers keys across restarts.

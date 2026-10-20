@@ -2,6 +2,7 @@ package segment
 
 import (
 	"context"
+	"maps"
 	"math/rand/v2"
 	"slices"
 	"testing"
@@ -403,5 +404,69 @@ func TestPostgresCountsCharactersLikeGo(t *testing.T) {
 	}
 	if multiByte == 0 {
 		t.Fatalf("none of %d values has a multi-byte character; the test proves nothing", n)
+	}
+}
+
+// TestRecipientsMatchOracle: for random rules, the people Recipients returns
+// for each channel are exactly those the oracle finds reachable on it, with
+// their own address and data. These are the people the approval freezes
+// into deliveries, so this is R4 at the point where messages are created.
+func TestRecipientsMatchOracle(t *testing.T) {
+	pool, reg, generated := seededDB(t, 3000)
+	ctx := context.Background()
+	rng := rand.New(rand.NewPCG(11, 11))
+
+	// Recipients runs inside the approval's transaction.
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	nonEmpty := 0
+	for range 100 {
+		raw, g := randomRule(rng, reg)
+		v, err := ParseAndValidate(raw, reg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ch := range content.Channels {
+			got, err := Recipients(ctx, tx, v, asOf, ch)
+			if err != nil {
+				t.Fatalf("Recipients %s: %v", raw, err)
+			}
+			var want []Recipient
+			for i, u := range generated { // ids follow insertion order
+				if !oracleMatches(u, g) {
+					continue
+				}
+				var addr *string
+				if ch == content.SMS && u.SMSOptIn {
+					addr = u.Phone
+				}
+				if ch == content.Email && u.EmailOptIn {
+					addr = u.Email
+				}
+				if addr == nil {
+					continue
+				}
+				want = append(want, Recipient{UserID: int64(i + 1), Address: *addr,
+					Values: content.Values{content.FirstName: u.FirstName, content.LastName: u.LastName, content.City: u.City}})
+			}
+			if len(got) != len(want) {
+				t.Fatalf("rule %s, %s: %d recipients, oracle %d", raw, ch, len(got), len(want))
+			}
+			for i := range got {
+				if got[i].UserID != want[i].UserID || got[i].Address != want[i].Address || !maps.Equal(got[i].Values, want[i].Values) {
+					t.Fatalf("rule %s, %s recipient %d = %+v, oracle %+v", raw, ch, i, got[i], want[i])
+				}
+			}
+			if len(want) > 0 {
+				nonEmpty++
+			}
+		}
+	}
+	if nonEmpty < 100 {
+		t.Errorf("only %d of 200 rule/channel pairs had recipients", nonEmpty)
 	}
 }

@@ -2,8 +2,10 @@ package segment
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/content"
@@ -49,12 +51,62 @@ func (a Audience) Reach(channels []content.Channel) Reach {
 
 // Channel reachability = consent AND contact data. The schema's CHECK
 // constraints already make consent imply contact; spelling both out keeps
-// the rule visible where audiences are counted (and, in P4, where messages
-// are created). These filters are applied by the backend, never by the rule.
+// the rule visible where audiences are counted and where messages are
+// created (Recipients). These filters are applied by the backend, never by
+// the rule.
 const (
 	smsReachableSQL   = "sms_opt_in AND phone IS NOT NULL"
 	emailReachableSQL = "email_opt_in AND email IS NOT NULL"
 )
+
+// Recipient is one person a channel reaches, with what a message to them
+// needs.
+type Recipient struct {
+	UserID int64
+	// Address is the phone number for SMS and the email address for email.
+	Address string
+	Values  content.Values
+}
+
+// Querier runs a query; a pool and a transaction both satisfy it, so the
+// approval can read the audience inside its own transaction.
+type Querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// Recipients returns the people of the audience that ch reaches (R4), in id
+// order. The approval freezes exactly these people into deliveries.
+func Recipients(ctx context.Context, q Querier, v Validated, asOf time.Time, ch content.Channel) ([]Recipient, error) {
+	var reach, address string
+	switch ch {
+	case content.SMS:
+		reach, address = smsReachableSQL, "phone"
+	case content.Email:
+		reach, address = emailReachableSQL, "email"
+	default:
+		return nil, fmt.Errorf("unknown channel %q", ch)
+	}
+	c := Compile(v, asOf)
+	rows, err := q.Query(ctx, `SELECT id, `+address+`, first_name, last_name, city
+	                           FROM users
+	                           WHERE `+c.Where+` AND (`+reach+`)
+	                           ORDER BY id`, c.Args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Recipient
+	for rows.Next() {
+		var r Recipient
+		var first, last, city string
+		if err := rows.Scan(&r.UserID, &r.Address, &first, &last, &city); err != nil {
+			return nil, err
+		}
+		r.Values = content.Values{content.FirstName: first, content.LastName: last, content.City: city}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
 
 // Counter counts audiences in the database.
 type Counter struct {

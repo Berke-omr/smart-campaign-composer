@@ -203,3 +203,58 @@ func TestLoadLLMErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadMockProvider(t *testing.T) {
+	c, err := LoadMockProvider(MapLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := MockProvider{LatencyMin: 20 * time.Millisecond, LatencyMax: 120 * time.Millisecond, ErrorRate: 0.03,
+		ThrottleRate: 0.03, SlowRate: 0.005, SlowDelay: 10 * time.Second, RejectRate: 0.01, RateLimit: 100}
+	if c != want {
+		t.Errorf("defaults = %+v, want %+v", c, want)
+	}
+
+	c, err = LoadMockProvider(MapLookup(map[string]string{
+		"MOCK_LATENCY_MIN": "0", "MOCK_LATENCY_MAX": "0s", "MOCK_ERROR_RATE": "0", "MOCK_THROTTLE_RATE": "0.5",
+		"MOCK_SLOW_RATE": "0.5", "MOCK_REJECT_RATE": "1", "MOCK_RATE_LIMIT": "0",
+	}))
+	if err != nil || c.LatencyMax != 0 || c.ThrottleRate != 0.5 || c.RejectRate != 1 || c.RateLimit != 0 {
+		t.Errorf("overrides = %+v (err %v)", c, err)
+	}
+
+	// Every bad value is reported at once.
+	_, err = LoadMockProvider(MapLookup(map[string]string{
+		"MOCK_ERROR_RATE": "1.5", "MOCK_THROTTLE_RATE": "abc", "MOCK_LATENCY_MIN": "-1s", "MOCK_RATE_LIMIT": "-3",
+	}))
+	for _, key := range []string{"MOCK_ERROR_RATE", "MOCK_THROTTLE_RATE", "MOCK_LATENCY_MIN", "MOCK_RATE_LIMIT"} {
+		if err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("error %v does not mention %s", err, key)
+		}
+	}
+	_, err = LoadMockProvider(MapLookup(map[string]string{"MOCK_LATENCY_MIN": "2s", "MOCK_LATENCY_MAX": "1s"}))
+	if err == nil || !strings.Contains(err.Error(), "above MOCK_LATENCY_MAX") {
+		t.Errorf("min above max: %v", err)
+	}
+	_, err = LoadMockProvider(MapLookup(map[string]string{"MOCK_ERROR_RATE": "0.6", "MOCK_THROTTLE_RATE": "0.5"}))
+	if err == nil || !strings.Contains(err.Error(), "at most 1") {
+		t.Errorf("rates above 1: %v", err)
+	}
+}
+
+func TestLoadWorker(t *testing.T) {
+	c, err := LoadWorker(MapLookup(nil))
+	want := Worker{ProviderURL: "http://mock-provider:8080", ProviderTimeout: 3 * time.Second, Senders: 32, Lease: 30 * time.Second}
+	if err != nil || c != want {
+		t.Errorf("defaults = %+v (err %v), want %+v", c, err, want)
+	}
+	c, err = LoadWorker(MapLookup(map[string]string{"PROVIDER_URL": "http://localhost:18090/", "PROVIDER_TIMEOUT": "500ms",
+		"WORKER_CONCURRENCY": "8", "WORKER_LEASE": "1s"}))
+	if err != nil || c.ProviderURL != "http://localhost:18090" || c.Senders != 8 || c.Lease != time.Second {
+		t.Errorf("overrides = %+v (err %v)", c, err)
+	}
+	_, err = LoadWorker(MapLookup(map[string]string{"PROVIDER_TIMEOUT": "20s", "WORKER_CONCURRENCY": "0"}))
+	if err == nil || !strings.Contains(err.Error(), "WORKER_LEASE (30s) must be at least twice") || !strings.Contains(err.Error(), "WORKER_CONCURRENCY") {
+		t.Errorf("bad values: %v", err)
+	}
+}
