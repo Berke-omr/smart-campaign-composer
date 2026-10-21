@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -235,7 +236,8 @@ func TestMetricsWithoutTheDatabase(t *testing.T) {
 	reg := NewRegistry()
 	NewLLM(reg)
 	RegisterDeliveries(reg, pool)
-	got := scrape(t, Handler(reg, logging.Discard()))
+	var logs strings.Builder
+	got := scrape(t, Handler(reg, slog.New(slog.NewJSONHandler(&logs, nil))))
 	if _, ok := got[`scc_llm_repairs_total{task="sms"}`]; !ok {
 		t.Error("the LLM metrics are missing")
 	}
@@ -243,5 +245,9 @@ func TestMetricsWithoutTheDatabase(t *testing.T) {
 		if strings.HasPrefix(s, "scc_deliveries{") {
 			t.Errorf("%s served without a database", s)
 		}
+	}
+	// The log names the cause.
+	if !strings.Contains(logs.String(), "scc_deliveries") || !strings.Contains(logs.String(), addr) {
+		t.Errorf("log does not say what failed:\n%s", logs.String())
 	}
 }

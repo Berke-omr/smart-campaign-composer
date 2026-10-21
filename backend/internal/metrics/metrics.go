@@ -7,6 +7,7 @@ package metrics
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -40,7 +41,11 @@ func Handler(reg *prometheus.Registry, logger *slog.Logger) http.Handler {
 
 type errorLog struct{ logger *slog.Logger }
 
-func (l errorLog) Println(v ...any) { l.logger.Error("metrics", "err", v) }
+// Println logs promhttp's message as text: an error value inside v would
+// otherwise be printed as {} by the JSON log handler.
+func (l errorLog) Println(v ...any) {
+	l.logger.Error("metrics could not be gathered", "err", fmt.Sprint(v...))
+}
 
 // ---- worker ----
 
