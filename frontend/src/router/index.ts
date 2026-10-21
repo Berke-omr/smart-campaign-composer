@@ -1,9 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import StatusView from '@/views/StatusView.vue'
+import ComposerView from '@/views/ComposerView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
-  routes: [{ path: '/', name: 'status', component: StatusView }],
+  routes: [
+    { path: '/', name: 'composer', component: ComposerView },
+    { path: '/:pathMatch(.*)*', redirect: '/' },
+  ],
 })
 
 export default router

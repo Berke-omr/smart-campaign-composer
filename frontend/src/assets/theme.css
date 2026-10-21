@@ -1,0 +1,226 @@
+/*
+ * Design tokens (DESIGN.md sections 2-5). Every color, size, radius, shadow and
+ * duration used by a component comes from here; components never hard-code them.
+ *
+ * Breakpoint: native CSS variables cannot be used inside media queries, so the
+ * one layout breakpoint is written as `(width < 1200px)` where it is needed
+ * (--breakpoint-compact below documents the value).
+ */
+
+:root {
+  /* ---- Base colors (DESIGN.md section 2) ---- */
+  --color-bg: #f4f7fb;
+  --color-blob-aqua: #9fe8da;
+  --color-blob-sky: #b9d4ff;
+  --color-blob-peach: #ffd3be;
+  --color-white: #ffffff;
+  --color-glass: rgb(255 255 255 / 55%);
+  --color-text: #0f172a;
+  --color-text-secondary: #5b6b82;
+  --color-primary-start: #ff7a59;
+  --color-primary-end: #ff4d8d;
+  --color-navy: #111c33;
+  --color-sms: #0ea5a4;
+  --color-email: #7c5cff;
+  --color-campaign-draft: #5b6b82;
+  --color-campaign-ready: #f59e0b;
+  --color-campaign-sending: #2f6bff;
+  --color-campaign-completed: #16a34a;
+  --color-campaign-failed: #dc2626;
+  --color-message-queued: var(--color-campaign-draft);
+  --color-message-sending: var(--color-campaign-sending);
+  --color-message-sent: var(--color-campaign-completed);
+  --color-message-retrying: var(--color-campaign-ready);
+  --color-message-failed: var(--color-campaign-failed);
+
+  /* ---- Derived surface and interaction colors ---- */
+  --color-glass-border: rgb(255 255 255 / 65%);
+  --color-glass-highlight: rgb(255 255 255 / 80%);
+  --color-glass-hover: rgb(255 255 255 / 72%);
+  --color-field: rgb(255 255 255 / 35%);
+  --color-glass-opaque: var(--color-white);
+  --color-border-control: var(--color-text-secondary);
+  --color-focus: var(--color-navy);
+  --color-overlay: rgb(17 28 51 / 24%);
+  --color-track: rgb(91 107 130 / 12%);
+
+  /* Accessible primary action: white text on the original coral/pink is below 4.5:1. */
+  --color-primary-aa-start: color-mix(in srgb, var(--color-primary-start) 65%, var(--color-navy));
+  --color-primary-aa-end: color-mix(in srgb, var(--color-primary-end) 65%, var(--color-navy));
+
+  /* ---- Families: tint (pill background), border, ink (text on the tint) ---- */
+  --color-sms-tint: color-mix(in srgb, var(--color-sms) 12%, transparent);
+  --color-sms-border: color-mix(in srgb, var(--color-sms) 24%, transparent);
+  --color-sms-ink: color-mix(in srgb, var(--color-sms) 50%, var(--color-text));
+  --color-email-tint: color-mix(in srgb, var(--color-email) 12%, transparent);
+  --color-email-border: color-mix(in srgb, var(--color-email) 24%, transparent);
+  --color-email-ink: color-mix(in srgb, var(--color-email) 50%, var(--color-text));
+
+  --color-campaign-draft-tint: color-mix(in srgb, var(--color-campaign-draft) 12%, transparent);
+  --color-campaign-draft-border: color-mix(in srgb, var(--color-campaign-draft) 24%, transparent);
+  --color-campaign-draft-ink: color-mix(
+    in srgb,
+    var(--color-campaign-draft) 50%,
+    var(--color-text)
+  );
+  --color-campaign-ready-tint: color-mix(in srgb, var(--color-campaign-ready) 12%, transparent);
+  --color-campaign-ready-border: color-mix(in srgb, var(--color-campaign-ready) 24%, transparent);
+  --color-campaign-ready-ink: color-mix(
+    in srgb,
+    var(--color-campaign-ready) 50%,
+    var(--color-text)
+  );
+  --color-campaign-sending-tint: color-mix(in srgb, var(--color-campaign-sending) 12%, transparent);
+  --color-campaign-sending-border: color-mix(
+    in srgb,
+    var(--color-campaign-sending) 24%,
+    transparent
+  );
+  --color-campaign-sending-ink: color-mix(
+    in srgb,
+    var(--color-campaign-sending) 50%,
+    var(--color-text)
+  );
+  --color-campaign-completed-tint: color-mix(
+    in srgb,
+    var(--color-campaign-completed) 12%,
+    transparent
+  );
+  --color-campaign-completed-border: color-mix(
+    in srgb,
+    var(--color-campaign-completed) 24%,
+    transparent
+  );
+  --color-campaign-completed-ink: color-mix(
+    in srgb,
+    var(--color-campaign-completed) 50%,
+    var(--color-text)
+  );
+  --color-campaign-failed-tint: color-mix(in srgb, var(--color-campaign-failed) 12%, transparent);
+  --color-campaign-failed-border: color-mix(in srgb, var(--color-campaign-failed) 24%, transparent);
+  --color-campaign-failed-ink: color-mix(
+    in srgb,
+    var(--color-campaign-failed) 50%,
+    var(--color-text)
+  );
+
+  --color-message-queued-tint: color-mix(in srgb, var(--color-message-queued) 12%, transparent);
+  --color-message-queued-border: color-mix(in srgb, var(--color-message-queued) 24%, transparent);
+  --color-message-queued-ink: color-mix(
+    in srgb,
+    var(--color-message-queued) 50%,
+    var(--color-text)
+  );
+  --color-message-sending-tint: color-mix(in srgb, var(--color-message-sending) 12%, transparent);
+  --color-message-sending-border: color-mix(in srgb, var(--color-message-sending) 24%, transparent);
+  --color-message-sending-ink: color-mix(
+    in srgb,
+    var(--color-message-sending) 50%,
+    var(--color-text)
+  );
+  --color-message-sent-tint: color-mix(in srgb, var(--color-message-sent) 12%, transparent);
+  --color-message-sent-border: color-mix(in srgb, var(--color-message-sent) 24%, transparent);
+  --color-message-sent-ink: color-mix(in srgb, var(--color-message-sent) 50%, var(--color-text));
+  --color-message-retrying-tint: color-mix(in srgb, var(--color-message-retrying) 12%, transparent);
+  --color-message-retrying-border: color-mix(
+    in srgb,
+    var(--color-message-retrying) 24%,
+    transparent
+  );
+  --color-message-retrying-ink: color-mix(
+    in srgb,
+    var(--color-message-retrying) 50%,
+    var(--color-text)
+  );
+  --color-message-failed-tint: color-mix(in srgb, var(--color-message-failed) 12%, transparent);
+  --color-message-failed-border: color-mix(in srgb, var(--color-message-failed) 24%, transparent);
+  --color-message-failed-ink: color-mix(
+    in srgb,
+    var(--color-message-failed) 50%,
+    var(--color-text)
+  );
+
+  /* ---- Typography (DESIGN.md section 3); fonts are self-hosted from npm (main.ts) ---- */
+  --font-ui: 'Inter Variable', Inter, system-ui, sans-serif;
+  --font-heading: 'Urbanist Variable', Urbanist, var(--font-ui);
+  --font-counter: 'JetBrains Mono Variable', 'JetBrains Mono', monospace;
+
+  --font-size-hero: 4rem;
+  --line-height-hero: 4.5rem;
+  --font-weight-hero: 600;
+  --font-size-h1: 2.25rem;
+  --line-height-h1: 2.75rem;
+  --font-weight-h1: 700;
+  --font-size-h2: 1.5rem;
+  --line-height-h2: 2rem;
+  --font-weight-h2: 700;
+  --font-size-h3: 1.25rem;
+  --line-height-h3: 1.75rem;
+  --font-weight-h3: 600;
+  --font-size-body: 1rem;
+  --line-height-body: 1.5rem;
+  --font-size-compose: 1.5rem;
+  --line-height-compose: 2rem;
+  --font-size-label: 0.875rem;
+  --line-height-label: 1.25rem;
+  --font-weight-label: 500;
+  --font-size-caption: 0.75rem;
+  --line-height-caption: 1rem;
+  --font-size-counter: 0.75rem;
+  --line-height-counter: 1rem;
+
+  /* ---- Spacing, radii, shadows, glass (DESIGN.md section 4) ---- */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  --radius-card: 24px;
+  --radius-field: 18px;
+  --radius-pill: 9999px;
+  --border-thin: 1px;
+  --blur-glass: 24px;
+  --blur-blob: 96px;
+  --shadow-card: 0 8px 32px rgb(17 28 51 / 6%);
+  --shadow-raised: 0 12px 40px rgb(17 28 51 / 10%);
+  --shadow-highlight: inset 0 1px 0 var(--color-glass-highlight);
+  --opacity-disabled: 0.45;
+  --focus-width: 2px;
+  --focus-offset: 4px;
+  --control-height: 3rem;
+  --icon-button-size: 3rem;
+
+  /* ---- Layout ---- */
+  --shell-inset: 20px;
+  --sidebar-width: 256px;
+  --sidebar-compact-width: 224px;
+  --layout-gap: 24px;
+  --breakpoint-compact: 1200px; /* documentation only, see the note at the top */
+
+  /* ---- Motion (DESIGN.md section 5) ---- */
+  --duration-fast: 160ms;
+  --duration-pulse: 1200ms;
+  --duration-shimmer: 1600ms;
+  --ease-ui: ease-out;
+
+  color-scheme: light;
+}
+
+/* Shimmer, pulse, spinners and transitions are decoration; labels carry the state. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

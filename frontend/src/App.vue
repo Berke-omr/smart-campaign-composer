@@ -1,31 +1,89 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
+import AppSidebar from '@/components/layout/AppSidebar.vue'
+import TopBar from '@/components/layout/TopBar.vue'
 </script>
 
 <template>
-  <header class="app-header">
-    <h1>Smart Campaign Composer</h1>
-  </header>
-  <main class="app-main">
-    <RouterView />
-  </main>
+  <div class="backdrop" aria-hidden="true">
+    <span class="blob blob-aqua"></span>
+    <span class="blob blob-sky"></span>
+    <span class="blob blob-peach"></span>
+  </div>
+  <div class="shell">
+    <AppSidebar />
+    <div class="main-column">
+      <TopBar />
+      <main class="main">
+        <RouterView />
+      </main>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-.app-header {
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+/* Atmospheric glows behind everything; never interactive. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
 }
 
-.app-header h1 {
-  margin: 0;
-  font-size: 1.15rem;
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(var(--blur-blob));
+  opacity: 0.7;
 }
 
-.app-main {
-  max-width: 64rem;
-  margin: 0 auto;
-  padding: 1.5rem 1rem;
+.blob-aqua {
+  top: -20vh;
+  left: -10vw;
+  width: 55vw;
+  height: 55vh;
+  background: var(--color-blob-aqua);
+}
+
+.blob-sky {
+  top: 20vh;
+  right: -15vw;
+  width: 50vw;
+  height: 60vh;
+  background: var(--color-blob-sky);
+}
+
+.blob-peach {
+  bottom: -25vh;
+  left: 25vw;
+  width: 50vw;
+  height: 45vh;
+  background: var(--color-blob-peach);
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  gap: var(--layout-gap);
+  padding: var(--shell-inset);
+  min-height: 100vh;
+}
+
+.main-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.main {
+  min-width: 0;
+}
+
+@media (width < 1200px) {
+  .shell {
+    grid-template-columns: var(--sidebar-compact-width) minmax(0, 1fr);
+  }
 }
 </style>
