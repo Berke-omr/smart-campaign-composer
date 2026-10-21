@@ -21,14 +21,50 @@ type Generator struct {
 	Client Client
 	// AttemptTimeout bounds one attempt; a timeout counts as a failed attempt.
 	AttemptTimeout time.Duration
+	// Observe, when set, is told about every attempt that came to an end
+	// (metrics). An attempt cut short because the caller left is not
+	// reported: that says nothing about the model.
+	Observe func(AttemptStat)
+}
+
+// AttemptStat is one attempt as the metrics see it.
+type AttemptStat struct {
+	Task    Task
+	Attempt int // 1 is the first try; 2 and 3 are repairs
+	// Duration covers the model call (streaming included) and the checks.
+	Duration time.Duration
+	// Result is valid, invalid (the validator rejected the answer),
+	// refused, truncated, timeout or error (the model could not be reached).
+	Result string
 }
 
 // attemptFailure explains a failed attempt. repair is set when the model
 // produced an answer the validator rejected; it is quoted to the next attempt.
+// cause is set when there was no answer to validate.
 type attemptFailure struct {
 	problems []string
 	repair   *Repair
 	refusal  bool
+	cause    string // refused, truncated, timeout or error
+}
+
+// result names an attempt's outcome for AttemptStat.
+func result(f *attemptFailure) string {
+	switch {
+	case f == nil:
+		return "valid"
+	case f.cause != "":
+		return f.cause
+	default:
+		return "invalid"
+	}
+}
+
+func (g *Generator) observe(ctx context.Context, task Task, attempt int, started time.Time, f *attemptFailure) {
+	if g.Observe == nil || ctx.Err() != nil {
+		return
+	}
+	g.Observe(AttemptStat{Task: task, Attempt: attempt, Duration: time.Since(started), Result: result(f)})
 }
 
 // classify turns a Client error into a failed attempt.
@@ -36,13 +72,13 @@ func classify(err error) attemptFailure {
 	var refusal *RefusalError
 	switch {
 	case errors.As(err, &refusal):
-		return attemptFailure{refusal: true, problems: []string{refusal.Error()}}
+		return attemptFailure{refusal: true, cause: "refused", problems: []string{refusal.Error()}}
 	case errors.Is(err, ErrTruncated):
-		return attemptFailure{problems: []string{ErrTruncated.Error()}}
+		return attemptFailure{cause: "truncated", problems: []string{ErrTruncated.Error()}}
 	case errors.Is(err, context.DeadlineExceeded):
-		return attemptFailure{problems: []string{"the model did not answer in time"}}
+		return attemptFailure{cause: "timeout", problems: []string{"the model did not answer in time"}}
 	default:
-		return attemptFailure{problems: []string{"the model could not be reached"}}
+		return attemptFailure{cause: "error", problems: []string{"the model could not be reached"}}
 	}
 }
 
@@ -96,7 +132,9 @@ func (g *Generator) Segment(ctx context.Context, reg *segment.Registry, brief st
 		b.attempt++
 		req := Request{Task: TaskSegment, Brief: brief, Attempt: b.attempt,
 			System: system, Prompt: SegmentPrompt(brief, repair), Schema: schema}
+		started := time.Now()
 		res, f := g.segmentAttempt(ctx, reg, req)
+		g.observe(ctx, TaskSegment, b.attempt, started, f)
 		usage = addUsage(usage, res.Usage)
 		if f == nil {
 			res.Attempts, res.Usage = b.attempt, usage
@@ -246,7 +284,9 @@ func (g *Generator) draft(ctx context.Context, in DraftInput, ch content.Channel
 
 		req := Request{Task: task, Brief: in.Brief, Attempt: b.attempt, System: system,
 			Prompt: ContentPrompt(ch, brief, repair), Schema: schema}
+		started := time.Now()
 		f := g.draftAttempt(ctx, req, ch, in.Longest[ch], &res, emit)
+		g.observe(ctx, task, b.attempt, started, f)
 		res.Attempts = b.attempt
 		if f == nil {
 			res.State = StateValid

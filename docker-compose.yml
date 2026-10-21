@@ -67,6 +67,9 @@ services:
     environment:
       <<: *backend-env
       HTTP_ADDR: ":8080"
+      # On SIGTERM open streams end at once and other requests get up to 8 s,
+      # inside the grace period below.
+      HTTP_SHUTDOWN_TIMEOUT: 8s
       # Empty values fall back to the api's defaults: LLM_PROVIDER=auto (Claude when
       # a key is set, the mock LLM otherwise) and LLM_MODEL=claude-sonnet-5-5.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -78,6 +81,9 @@ services:
     depends_on:
       seed:
         condition: service_completed_successfully
+    # Docker's grace period before SIGKILL, set so it does not depend on the
+    # machine's default (1 s on the development machine).
+    stop_grace_period: 10s
     restart: unless-stopped
 
   # One replica: the 100 messages/second/channel limit is kept in-process (D4).
@@ -90,6 +96,11 @@ services:
       PROVIDER_TIMEOUT: ${PROVIDER_TIMEOUT:-3s}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-32}
       WORKER_LEASE: ${WORKER_LEASE:-30s}
+      HTTP_ADDR: ":8080" # /metrics
+    # The worker's /metrics, published on localhost for debugging like the
+    # mock provider (the api's is on :8081/metrics).
+    ports:
+      - "127.0.0.1:${WORKER_METRICS_HOST_PORT:-18091}:8080"
     depends_on:
       migrate:
         condition: service_completed_successfully

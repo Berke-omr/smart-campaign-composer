@@ -5,6 +5,10 @@ import (
 	"time"
 )
 
+// MessagesPerSecond is the case's limit, per channel (R10). The worker sends
+// at this rate and the dashboard charts against it.
+const MessagesPerSecond = 100
+
 // Spacer is the per-channel rate limiter (DECISIONS.md D4, D24 K6). It lets
 // one send through at a time, never sooner than interval after the moment
 // it let the previous one through. Wait returns that moment, and the worker

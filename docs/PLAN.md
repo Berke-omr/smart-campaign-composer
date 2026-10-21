@@ -20,8 +20,8 @@
 | P2 | Segment DSL & audience | ✅ done (PR, branch `feat/p2-segment-dsl`) | 2026-10-19 |
 | P3 | LLM layer | ✅ done (PR, branch `feat/p3-llm`) | 2026-10-19 |
 | P4 | Approval & delivery pipeline | ✅ done (PR, branch `feat/p4-delivery`) | 2026-10-20 |
-| P5 | Tracking (SSE, metrics, health) | ⏳ next | — |
-| P6 | Frontend | ⬜ | — |
+| P5 | Tracking (SSE, metrics, health) | ✅ done (PR, branch `feat/p5-tracking`) | 2026-10-21 |
+| P6 | Frontend | ⏳ next | — |
 | P7 | Hardening & submission | ⬜ | — |
 | P8 | Bonus (optional) | ⬜ | — |
 
@@ -248,7 +248,8 @@ smart-campaign-composer/
 │   │   ├── campaign/           # state machine, service, repository
 │   │   ├── delivery/           # queue claim, rate limiter, retry policy, provider client
 │   │   ├── httpapi/            # handlers, SSE, middleware
-│   │   └── metrics/
+│   │   ├── tracking/           # live dashboard snapshots (P5)
+│   │   └── metrics/            # Prometheus metrics of the api and the worker (P5)
 │   └── migrations/
 ├── frontend/                   # Vue 3 + Vite + TS, served by nginx
 │   └── src/ api/ · views/ (Composer, CampaignDashboard, Campaigns) · components/
@@ -600,3 +601,90 @@ The `delivery` package takes about 30 s, most of it the rate, kill and graceful-
 - 429s have their own budget of 10 instead of counting among the 5 attempts (D6, K7).
 - `make reseed` now also empties campaigns (K9).
 - Estimate: about 10 h instead of 8 h.
+
+### P5
+
+All integration tests run against real Postgres (`-race`). The timing-dependent tests (the `httpapi` stream and
+shutdown tests, `metrics`, `llm`) were each run five times in a row; every run passed.
+
+**Done criteria:**
+
+| Criterion | Evidence | Result |
+|---|---|---|
+| `curl -N …/events` shows changing snapshots during a send | live, through nginx: weekend sale (3,714 emails) and new season (1,226 SMS) approved together | 48 and 20 snapshots; done 0 → 3,714 and 0 → 1,226, never going back; then `delivery.done` and curl exits 0 |
+| No per-second value above 100 per channel, compared with a SQL window query on `delivery_attempts` | live; `TestLiveDashboardDuringASend` | highest value in any snapshot 93 (email) / 94 (SMS); busiest half-open 1 s window in the log 94 / 94; the provider's own `peak_per_second` 94 / 94. In the test: 96–99 over 5 runs |
+| Snapshot counts equal the database (integration test, real Postgres) | `TestCountsPerChannelAndStatus`, `TestLiveDashboardDuringASend` | exact per channel and status; the five states add up to the total in every snapshot; the final snapshot equals the table |
+| A reconnect gets the whole state | `TestLiveDashboardDuringASend` (a second client mid-send), `TestEventsOfAFinishedCampaign`; live after an api restart | the first event is a complete snapshot |
+| The loop stops when the client leaves | `TestEventsStopWhenTheClientLeaves` (writes never fail, so only the context can stop it), `TestEventsStopWhenWritingFails` | the handler returns and reads no further snapshot; live, the api's `go_goroutines` went 10 → 15 with two streams open → 10 after they closed |
+| Counters on `/metrics` increase during a send | live | worker calls 0 → 898 → 2,672 → 5,287 (before, at 5 s, at 15 s, at the end); the api's `scc_deliveries` queued email 3,214 → 2,284 between 5 s and 15 s |
+| `/readyz` fails when Postgres is stopped and recovers | live; `TestReadyzWithAStoppedDatabase` | `503` after the 2 s ping timeout (2.03 s), `/healthz` `200` meanwhile; `200` on the first request after Postgres was healthy again |
+
+**The series against the attempt log (live):** 945 + 172 points of the captured snapshots compared with an independent
+`date_trunc('second', started_at)` count. None was above the log. 46 were below, by 1–3, each in a second that had at
+least that many timeouts and seen less than 5 s later: a timeout is logged 3 s after its call started, after the
+settling second (D25 K5). The final snapshots equal the log in all 30 seconds.
+
+**Metrics against the ledger:** live, the worker's counters after the run (5,287 calls: 4,890 sent; 347 retried, of them
+162 × 429, 153 × 503 and 32 without an answer; 50 rejected) equal `delivery_attempts` grouped by channel, outcome and
+status. `TestWorkerCountersMatchTheAttemptLog` asserts the same equality, and the deliveries gauge against the table,
+with 8% 503, 8% 429, 3% slow answers and 3% rejections.
+
+**Shutdown with open streams (live):** `docker compose stop api` with one dashboard open on the api and one through
+nginx took 0.43 s, exit code 0, and both streams ended without `delivery.done`. While the api was down nginx answered
+`502` (after which `EventSource` stops retrying; P6 reconnects itself, docs/API.md). After `docker compose start api`
+the reopened stream gave the campaign's completed state and `delivery.done` at once; the worker had finished it
+meanwhile.
+
+**Database down (live):** the api's `/metrics` still answered `200` without `scc_deliveries`, and logged
+`metrics could not be gathered … scc_deliveries …` with the failed connection.
+
+**Mutation checks.** A scratch script refused to go on unless the tree was clean, the replacement applied exactly once
+and the mutant passed `go build ./...` and `go vet`; it ran the package tests unfiltered (`-race -count=1`), then
+restored the file, compared it with its backup (`cmp`) and required a clean `git status`. All 19 mutants compiled.
+
+| Mutation | Caught by |
+|---|---|
+| `/readyz` ignores the ping | `TestReadyz`, `TestReadyzWithAStoppedDatabase` |
+| window's lower bound exclusive | `TestPerSecondSeries`, `TestFinishedCampaignKeepsItsLastWindow` |
+| no settling second | `TestPerSecondSeries` |
+| done counts retrying messages | `TestCountsPerChannelAndStatus` |
+| issues include sent calls | `TestRecentIssues` |
+| a finished campaign's window follows the clock | `TestFinishedCampaignKeepsItsLastWindow` |
+| the stream ignores the client leaving | `TestEventsStopWhenTheClientLeaves` |
+| the stream ignores failed writes | `TestEventsStopWhenWritingFails` |
+| a finished campaign keeps streaming | 4 tests, through the test client's 60 s timeout |
+| an unapproved campaign streams | `TestEventsAnswersBeforeTheStream/draft` and `/ready` |
+| streams ignore the shutdown | `TestShutdownEndsDashboardStreams` (`context deadline exceeded`), `TestShutdownEndsDraftStreams` |
+| the draft stream ignores the shutdown | `TestShutdownEndsDraftStreams` (both channels stored, `draft.done` sent) |
+| 429 counted as 503 | `TestWorkerCountersMatchTheAttemptLog` |
+| repairs not counted | `TestLLMMetrics` |
+| the gauge drops `retrying` | `TestWorkerCountersMatchTheAttemptLog` (after the fix below) |
+| the worker never calls its hook | `TestWorkerCountersMatchTheAttemptLog` |
+| an LLM timeout reported as `error` | `TestObserveReportsEveryAttempt` |
+| LLM attempts the caller cut short are reported | `TestObserveReportsEveryAttempt` |
+| the metrics error logged as a value | `TestMetricsWithoutTheDatabase` |
+
+*A surviving mutant:* dropping `retrying` from the gauge first passed every test, because the test looped over the
+code's own list of statuses. The test now lists them itself (commit `test(metrics)`), and the mutant fails it.
+*On reading the results:* one batch of mutation runs was shown through an extra terminal filter that also hid the
+`--- FAIL` lines; the failing test names above were read from the full logs the script keeps.
+
+**Problems found while verifying, and fixed:**
+- *The metrics error log said nothing:* promhttp passes the error inside a list, which the JSON log handler printed as
+  `{}`. It is now logged as text (commit `fix(metrics)`), and `TestMetricsWithoutTheDatabase` requires the cause in
+  the log.
+- *The gauge test above.*
+
+**Test suite:** `make test` exit 0 (16 Go packages with `-race` against Postgres in containers, Vitest 3 passed).
+
+**Deviations from the P5 plan** (approved before implementation, D25):
+- Two `/metrics` endpoints (api and worker) instead of one, and deliveries by status as a gauge instead of a counter
+  (D18 revised).
+- Draft streams also end when the api shuts down (P3 code), and `llm.Generator` and `delivery.Worker` got `Observe`
+  hooks.
+- New dependency `github.com/prometheus/client_golang` v1.24.1 (7 indirect modules, and one more used only by its test
+  helpers).
+- `MessagesPerSecond` moved from `cmd/worker` to the `delivery` package, so the snapshot reports the limit.
+- Estimate: 3 h in the plan, revised to about 8 h when P5 started (two endpoints, shutdown behaviour, depth of
+  verification).
+

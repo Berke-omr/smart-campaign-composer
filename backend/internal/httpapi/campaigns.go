@@ -153,35 +153,19 @@ func (d Deps) streamDrafts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	flusher, ok := w.(http.Flusher)
+	out, ok := newSSE(w)
 	if !ok {
 		internalError(w, r, d.Logger, errors.New("response writer cannot flush"))
 		return
 	}
-	started := false
-	emit := func(event string, data any) error {
-		payload, err := json.Marshal(data)
-		if err != nil {
-			return err
-		}
-		if !started {
-			started = true
-			h := w.Header()
-			h.Set("Content-Type", "text/event-stream")
-			h.Set("Cache-Control", "no-cache")
-			h.Set("X-Accel-Buffering", "no") // nginx: do not buffer this response
-			w.WriteHeader(http.StatusOK)
-		}
-		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, payload); err != nil {
-			return err
-		}
-		flusher.Flush()
-		return nil
-	}
-	if err := d.Campaigns.StreamDrafts(r.Context(), id, emit); err != nil {
-		if started {
+	// When the server stops, writing ends as if the client had left: nothing
+	// unfinished is stored, and the reopened stream starts those channels over.
+	ctx, cancel := d.streamContext(r)
+	defer cancel()
+	if err := d.Campaigns.StreamDrafts(ctx, id, out.emit); err != nil {
+		if out.started {
 			d.Logger.Error("draft stream failed", "campaign", id, "err", err)
-			_ = emit(campaign.EventError, map[string]string{"message": "the drafts could not be written"})
+			_ = out.emit(campaign.EventError, map[string]string{"message": "the drafts could not be written"})
 			return
 		}
 		d.campaignError(w, r, err)

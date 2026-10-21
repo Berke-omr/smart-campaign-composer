@@ -27,6 +27,15 @@ const sampleBrief = "Son 30 günde sepetine ürün ekleyip alışveriş yapmayan
 // campaignServer runs the api against a real database and the mock LLM.
 func campaignServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	srv := httptest.NewServer(NewRouter(campaignDeps(t, mock.Options{ChunkRunes: 8})))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// campaignDeps wires the api to a real database and the mock LLM, which
+// streams as opts say (its cities are filled in).
+func campaignDeps(t *testing.T, opts mock.Options) Deps {
+	t.Helper()
 	pool := testdb.New(t)
 	ctx := context.Background()
 	if _, err := seed.Load(ctx, pool, seed.Generate(5000, 42, fixedNow), false); err != nil {
@@ -42,18 +51,17 @@ func campaignServer(t *testing.T) *httptest.Server {
 	}
 	reg := segment.NewRegistry(cities)
 	counter := segment.NewCounter(pool)
+	opts.Cities = cities
 	svc := &campaign.Service{
 		Repo:      campaign.NewRepository(pool),
-		Generator: &llm.Generator{Client: mock.New(cat, mock.Options{Cities: cities, ChunkRunes: 8}), AttemptTimeout: time.Second},
+		Generator: &llm.Generator{Client: mock.New(cat, opts), AttemptTimeout: time.Second},
 		Registry:  reg, Audience: counter, LLMMode: "mock", Logger: logging.Discard(),
 		Now: func() time.Time { return fixedNow },
 	}
-	srv := httptest.NewServer(NewRouter(Deps{
+	return Deps{
 		Logger: logging.Discard(), Segments: reg, Audience: counter, Campaigns: svc,
 		Now: func() time.Time { return fixedNow },
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+	}
 }
 
 func do(t *testing.T, method, url, body string) (*http.Response, []byte) {

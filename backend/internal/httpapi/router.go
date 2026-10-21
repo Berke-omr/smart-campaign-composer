@@ -29,9 +29,31 @@ type Deps struct {
 	Examples []mock.Example
 	// Campaigns runs the draft flow; nil disables the campaign routes.
 	Campaigns *campaign.Service
-	// Now is the clock used to anchor relative-time rules; nil means time.Now.
+	// Now is the clock used to anchor relative-time rules and to time
+	// dashboard snapshots; nil means time.Now.
 	Now func() time.Time
+	// Tracking feeds the live dashboard stream; nil leaves the route out.
+	Tracking Snapshotter
+	// SnapshotEvery is the dashboard stream's interval; 0 means one second.
+	SnapshotEvery time.Duration
+	// Stopping is cancelled when the server begins to shut down, and every
+	// open stream (drafts, dashboard) ends then; the browser reconnects to
+	// the next api. nil: streams end only when their client leaves.
+	Stopping context.Context
+	// DB is pinged by /readyz; nil leaves the route out.
+	DB Pinger
+	// Metrics serves /metrics (Prometheus); nil leaves the route out.
+	Metrics http.Handler
 }
+
+// Pinger checks that the database answers. *pgxpool.Pool implements it.
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
+
+// readyTimeout bounds the readiness ping, so a database that hangs makes
+// /readyz fail instead of hang.
+const readyTimeout = 2 * time.Second
 
 // LLMInfo tells the UI which LLM is active, so it can show a demo badge when
 // the mock answers (DECISIONS.md D12).
@@ -53,16 +75,36 @@ func NewRouter(d Deps) http.Handler {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
+	if d.SnapshotEvery <= 0 {
+		d.SnapshotEvery = time.Second
+	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(d.Logger))
 	r.Use(middleware.Recoverer)
 
 	// Liveness: answers as long as the process can serve HTTP. It deliberately
-	// does not touch the database (that is what /readyz is for, added in P5).
+	// does not touch the database (that is what /readyz is for).
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	if d.Metrics != nil {
+		r.Method(http.MethodGet, "/metrics", d.Metrics)
+	}
+	// Readiness: the api can do its work only while the database answers.
+	if d.DB != nil {
+		r.Get("/readyz", func(w http.ResponseWriter, req *http.Request) {
+			ctx, cancel := context.WithTimeout(req.Context(), readyTimeout)
+			defer cancel()
+			if err := d.DB.Ping(ctx); err != nil {
+				d.Logger.Warn("not ready: database does not answer", "err", err)
+				httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{
+					"status": "unavailable", "error": "database unreachable"})
+				return
+			}
+			httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		})
+	}
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/stats/users", func(w http.ResponseWriter, req *http.Request) {
@@ -93,6 +135,9 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/campaigns/{id}/draft/stream", d.streamDrafts)
 			r.Put("/campaigns/{id}/messages/{channel}", d.editMessage)
 			r.Post("/campaigns/{id}/approve", d.approveCampaign)
+		}
+		if d.Tracking != nil {
+			r.Get("/campaigns/{id}/events", d.streamEvents)
 		}
 	})
 

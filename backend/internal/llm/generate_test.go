@@ -352,3 +352,100 @@ func TestDraftsStopWhenTheClientLeaves(t *testing.T) {
 		}
 	}
 }
+
+// observed records the attempts the generator reports for metrics.
+type observed struct {
+	mu    sync.Mutex
+	stats []llm.AttemptStat
+}
+
+func (o *observed) observe(a llm.AttemptStat) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.stats = append(o.stats, a)
+}
+
+// of renders one task's attempts as "1:invalid 2:valid".
+func (o *observed) of(task llm.Task) string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	var s []string
+	for _, a := range o.stats {
+		if a.Task == task {
+			s = append(s, fmt.Sprintf("%d:%s", a.Attempt, a.Result))
+			if a.Duration <= 0 {
+				s = append(s, "(no duration)")
+			}
+		}
+	}
+	return strings.Join(s, " ")
+}
+
+// TestObserveReportsEveryAttempt: the metrics hook hears about each attempt
+// with what became of it, repairs included.
+func TestObserveReportsEveryAttempt(t *testing.T) {
+	tests := []struct {
+		id   string
+		want map[llm.Task]string
+	}{
+		{"cart-reminder-istanbul", map[llm.Task]string{llm.TaskSMS: "1:valid", llm.TaskEmail: "1:valid"}},
+		{"fault-broken-json", map[llm.Task]string{llm.TaskSMS: "1:invalid 2:valid", llm.TaskEmail: "1:valid"}},
+		{"fault-long-sms", map[llm.Task]string{llm.TaskSMS: "1:invalid 2:invalid 3:invalid"}},
+		{"fault-refusal", map[llm.Task]string{llm.TaskSMS: "1:refused 2:refused", llm.TaskEmail: "1:refused 2:valid"}},
+		{"fault-timeout", map[llm.Task]string{llm.TaskSMS: "1:valid", llm.TaskEmail: "1:timeout 2:timeout 3:timeout"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			cat, _, gen := setup(t, mock.Options{})
+			var o observed
+			gen.Observe = o.observe
+			gen.Drafts(context.Background(), input(scenario(t, cat, tt.id)), func(llm.Event) {})
+			for task, want := range tt.want {
+				if got := o.of(task); got != want {
+					t.Errorf("%s: %q, want %q", task, got, want)
+				}
+			}
+		})
+	}
+
+	t.Run("segment", func(t *testing.T) {
+		cat, _, gen := setup(t, mock.Options{})
+		var o observed
+		gen.Observe = o.observe
+		if _, err := gen.Segment(context.Background(), segment.NewRegistry(cities), scenario(t, cat, "fault-unknown-field").Brief); err != nil {
+			t.Fatal(err)
+		}
+		if got := o.of(llm.TaskSegment); got != "1:invalid 2:valid" {
+			t.Errorf("segment: %q, want 1:invalid 2:valid", got)
+		}
+		for _, f := range []struct {
+			err  error
+			want string
+		}{
+			{llm.ErrTruncated, "1:truncated 2:truncated 3:truncated"},
+			{errors.New("connection refused"), "1:error 2:error 3:error"},
+		} {
+			var o observed
+			gen := &llm.Generator{Client: failing{f.err}, Observe: o.observe}
+			_, _ = gen.Segment(context.Background(), segment.NewRegistry(cities), "any brief")
+			if got := o.of(llm.TaskSegment); got != f.want {
+				t.Errorf("%v: %q, want %q", f.err, got, f.want)
+			}
+		}
+	})
+
+	// An attempt cut short because the caller left is not the model's
+	// doing and is not reported.
+	t.Run("caller left", func(t *testing.T) {
+		cat, _, gen := setup(t, mock.Options{ChunkDelay: 5 * time.Millisecond, ChunkRunes: 1})
+		gen.AttemptTimeout = 0
+		var o observed
+		gen.Observe = o.observe
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+		defer cancel()
+		gen.Drafts(ctx, input(scenario(t, cat, "cart-reminder-istanbul")), func(llm.Event) {})
+		if len(o.stats) != 0 {
+			t.Errorf("reported %+v after the caller left", o.stats)
+		}
+	})
+}

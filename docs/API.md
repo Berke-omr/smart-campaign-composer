@@ -1,7 +1,6 @@
 # API contract
 
-> REST and SSE contract of the api service, as built in P3 and P4. It is the input for the frontend (P6).
-> The live dashboard stream arrives in P5 and will be added here.
+> REST and SSE contract of the api service, as built in P3, P4 and P5. It is the input for the frontend (P6).
 > Rationale: [`DECISIONS.md`](../DECISIONS.md). Examples below are real responses from the mock LLM.
 
 ## Conventions
@@ -220,6 +219,7 @@ Writes the message of every selected channel that has none yet, and streams the 
 - Channels already stored are replayed first as one final `draft.state` event each, **without calling the model**. Reopening a finished draft costs nothing.
 - Channels are written in parallel. Each finished channel is stored **before** its final event is sent.
 - If the client disconnects, writing stops and nothing unfinished is stored; opening the stream again starts the missing channels over.
+- The same happens when the api shuts down: the stream ends without `draft.done`, and the browser reconnects (P5).
 - One stream per campaign at a time: a second one gets `409` (as JSON, before any event). `404` for an unknown campaign; `409` once content is locked.
 
 Response headers: `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `X-Accel-Buffering: no`. Each event:
@@ -327,9 +327,136 @@ DECISIONS.md D6.
 | `failed` | Failed | the provider rejected it (other 4xx), or its attempts ran out (5 errors, or 10 answers of 429) |
 
 Every provider call is logged in `delivery_attempts` (attempt number, `started_at`, `finished_at`, HTTP status or none
-for a timeout, outcome `sent` / `retry` / `failed`, error, the provider's `Retry-After`, and when the retry is due). P5's
-"Recent issues" and sends-per-second chart read it; an entry reads like `429 provider busy, retrying in 2.1s` or
-`no answer within 3s, retrying in 1.5s`.
+for a timeout, outcome `sent` / `retry` / `failed`, error, the provider's `Retry-After`, and when the retry is due). The
+[live dashboard](#live-dashboard)'s "Recent issues" and sends-per-second chart read it.
+
+## Live dashboard
+
+### `GET /api/campaigns/{id}/events` (SSE)
+
+The live state of a sending campaign (DECISIONS.md D7, D25). Use `EventSource`.
+
+- The first event is a full [snapshot](#snapshot), sent at once; then one every second. Every snapshot carries the
+  whole state, never a change, so a client that reconnects needs nothing but the next one (no `Last-Event-ID`).
+- When the campaign is `completed` or `failed`: its final snapshot, then `delivery.done`, then the stream closes.
+  Opening the stream of a finished campaign gives those two events at once. **Call `es.close()` on `delivery.done`**:
+  `EventSource` reopens any stream that closes.
+- `404` for an unknown campaign and `409` for a campaign that is not approved yet (`draft` or `ready`), as JSON before
+  any event. `EventSource` does not reconnect after an answer that is not `200`.
+- The stream begins with `retry: 3000` (the browser waits 3 s before reconnecting) and has the same headers as the
+  draft stream (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, `X-Accel-Buffering: no`).
+- The server stops reading as soon as the client leaves. When the api shuts down, open streams end without
+  `delivery.done`.
+
+| Event | Data | Meaning |
+|---|---|---|
+| `delivery.snapshot` | a [snapshot](#snapshot) | the campaign's whole live state |
+| `delivery.error` | `{message}` | this second's snapshot could not be read (e.g. the database is restarting); the stream stays open and tries again next second. Keep showing the last snapshot |
+| `delivery.done` | `{campaign_id, status}` | the campaign is finished; the stream closes |
+
+**Reconnecting (for the "Reconnecting…" state, DESIGN.md).** While the api restarts, nginx answers `502`, and
+`EventSource` then gives up for good (`readyState` becomes `CLOSED`) instead of retrying. The client has to reopen the
+stream itself, with a backoff, and keep the last snapshot on screen meanwhile; the first snapshot after the reconnect
+replaces it completely. Only `delivery.done` means the stream is over.
+
+### Snapshot
+
+A real one, from the mock provider's defaults (an SMS-only campaign about 10 s into sending; `recent_issues` cut to three):
+
+```json
+{
+  "campaign_id": 13, "status": "sending",
+  "approved_at": "2026-10-21T10:16:15.197516Z", "finished_at": null,
+  "at": "2026-10-21T10:16:25.255557959Z",
+  "total": 1226, "done": 860,
+  "window": {"from": "2026-10-21T10:15:54Z", "to": "2026-10-21T10:16:24Z"},
+  "channels": {
+    "sms": {
+      "total": 1226, "done": 860,
+      "queued": 266, "sending": 51, "retrying": 49, "sent": 844, "failed": 16,
+      "per_second": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65, 93, 93, 92, 90, 92, 92, 94, 92],
+      "rate": 92, "limit": 100
+    }
+  },
+  "recent_issues": [
+    {"at": "2026-10-21T10:16:25.042721Z", "channel": "sms", "kind": "rejected", "code": 400, "outcome": "failed",
+     "retry_in_ms": null, "attempt": 1, "error": "400 invalid recipient"},
+    {"at": "2026-10-21T10:16:24.981641Z", "channel": "sms", "kind": "no_answer", "code": null, "outcome": "retry",
+     "retry_in_ms": 579, "attempt": 1, "error": "no answer within 3s"},
+    {"at": "2026-10-21T10:16:24.713263Z", "channel": "sms", "kind": "throttled", "code": 429, "outcome": "retry",
+     "retry_in_ms": 1284, "attempt": 1, "error": "429 provider busy"}
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `status`, `approved_at`, `finished_at` | as in the [campaign view](#campaign-view): "Started 14:32:05" is `approved_at` |
+| `at` | when the snapshot was taken (the api's clock). Use it for "last updated" and for the age of an issue ("now", "3s") |
+| `total`, `done` | messages over the selected channels; `done` = sent + failed ("143 of 232 done"). Progress = `done / total` |
+| `channels` | the selected channels only. The five states add up to the channel's `total` in every snapshot |
+| `per_second` | 30 values, oldest first: provider calls **started** in each second of `window` (retries and 429s included, since the 100/s limit is on calls). Replace the series with each snapshot; don't append |
+| `window` | the seconds of `per_second`, whole seconds, `from` inclusive, `to` exclusive |
+| `rate` | the newest value of `per_second`: the gauge's "84 msg/s". `0` once the campaign is finished |
+| `limit` | the per-channel limit, `100` (the chart's dashed line) |
+| `recent_issues` | up to 10 calls that did not end in a sent message, newest first |
+
+How the window moves:
+
+- **While sending**, the window ends one second before the current one: a call is logged when its answer arrives, so
+  the second that has just ended is still incomplete. The chart therefore lags by one to two seconds, and a point is
+  final when it appears. A call that times out is logged up to 3 s after it started, so such a point can still grow by
+  one or two in the next snapshots.
+- **Once the campaign is finished**, the window ends with its last call and stays there, so the chart keeps showing how
+  the campaign went out ("Keep chart and issue history").
+
+No value of `per_second` can exceed 100: the worker spaces each channel's calls at least 10 ms apart, measured on the
+very timestamps this series counts (D4).
+
+#### Recent issues
+
+| Field | Meaning |
+|---|---|
+| `at` | when the answer came, or when the worker stopped waiting for one |
+| `kind` | `throttled` (429), `provider_error` (5xx), `rejected` (other 4xx), `no_answer` (timeout or network error) |
+| `code` | the HTTP status; `null` when there was no answer |
+| `outcome` | `retry` or `failed` (the message will not be sent) |
+| `retry_in_ms` | when retrying: how long after this call the retry was scheduled; `null` when failed |
+| `attempt`, `error` | the attempt number and the provider's or worker's message, for a tooltip |
+
+The UI writes the text, e.g. `throttled` + `retry` → "Provider busy · retrying in 1s", `provider_error` + `retry` →
+"Provider error · retrying", `rejected` → "Rejected · won't retry", `no_answer` + `retry` → "No answer · retrying",
+any `failed` → "won't retry".
+
+## Health and metrics
+
+These are on the api itself (`localhost:8081`), not under `/api`, so nginx does not expose them on port 8080.
+
+| Endpoint | Answer |
+|---|---|
+| `GET /healthz` | `200 {"status":"ok"}` while the process serves HTTP. No dependencies (Docker's health check) |
+| `GET /readyz` | `200 {"status":"ok"}` when the database answers a ping within 2 s; otherwise `503 {"status":"unavailable","error":"database unreachable"}` (the cause is logged) |
+| `GET /metrics` | Prometheus text format (below) |
+
+### `GET /metrics`
+
+Each process serves what happens in it (DECISIONS.md D25). The api is at `localhost:8081/metrics`; the worker at
+`127.0.0.1:18091/metrics` (published for debugging only, like the mock provider). Both also have the Go runtime and
+process metrics (`go_goroutines`, `process_resident_memory_bytes`, …).
+
+| Metric | Where | Type | Labels | Meaning |
+|---|---|---|---|---|
+| `scc_provider_calls_total` | worker | counter | `channel`, `result` (`sent`, `retry`, `failed`), `code` (HTTP status, or `none` for a timeout or network error) | provider calls. Retries: `result="retry"`; 429s: `code="429"` |
+| `scc_provider_call_duration_seconds` | worker | histogram | `channel` | from the rate limiter letting a call go to its answer or timeout |
+| `scc_deliveries` | api | gauge | `channel`, `status` | deliveries in each state, read from the database when scraped (every combination, zeros included) |
+| `scc_llm_attempts_total` | api | counter | `task` (`segment`, `sms`, `email`), `result` (`valid`, `invalid`, `refused`, `truncated`, `timeout`, `error`) | model attempts. Validation failures: `result="invalid"` |
+| `scc_llm_repairs_total` | api | counter | `task` | repair attempts (attempt 2 or 3) |
+| `scc_llm_attempt_duration_seconds` | api | histogram | `task` | one attempt: the model call, streaming included, and its validation |
+
+- An attempt cut short because the client left is not counted: it says nothing about the model.
+- The worker's counters start at zero when it restarts (Prometheus handles counter resets); `scc_deliveries` does not,
+  because it is read from the table.
+- If the database is down, the api's `/metrics` still answers `200` without `scc_deliveries`, and logs why.
 
 ## Mock SMS/email provider
 
@@ -379,5 +506,9 @@ curl -s -X POST localhost:8080/api/campaigns -H 'Content-Type: application/json'
   -d '{"brief":"Son 30 günde sepetine ürün ekleyip alışveriş yapmayan İstanbul'\''daki kullanıcılara %30 indirim hatırlatması gönder. Samimi ama kısa olsun.","channels":["sms","email"],"tone":"friendly"}'
 curl -N localhost:8080/api/campaigns/1/draft/stream
 curl -s -X POST localhost:8080/api/campaigns/1/approve
+curl -N localhost:8080/api/campaigns/1/events
 curl -s localhost:18090/stats
+curl -s localhost:8081/readyz
+curl -s localhost:8081/metrics | grep '^scc_'
+curl -s 127.0.0.1:18091/metrics | grep '^scc_provider_calls_total'
 ```
