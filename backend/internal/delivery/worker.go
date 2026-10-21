@@ -25,6 +25,9 @@ type Worker struct {
 	Batch        int           // rows claimed at a time, and the buffer size (10)
 	Poll         time.Duration // wait when nothing is due (200 ms)
 	DrainTimeout time.Duration // on stop, time left to finish what is in hand (8 s)
+	// Observe, when set, is told about every provider call that returned
+	// (metrics), whether or not recording it succeeds.
+	Observe func(Job, Call, Decision)
 }
 
 // Run works until ctx is cancelled. It then stops claiming, lets the
@@ -136,6 +139,9 @@ func (w *Worker) send(work context.Context, limiter *Spacer, j Job) {
 		throttled++
 	}
 	d := w.Policy.Next(r, j.Attempt, throttled)
+	if w.Observe != nil {
+		w.Observe(j, call, d)
+	}
 	ok, err := w.Queue.Finish(work, j, call, d)
 	switch {
 	case err != nil:

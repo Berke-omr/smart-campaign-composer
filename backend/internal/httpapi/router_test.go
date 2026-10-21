@@ -99,6 +99,17 @@ func TestReadyzWithTheDatabase(t *testing.T) {
 	}
 }
 
+func TestMetricsRoute(t *testing.T) {
+	if rec := serve(t, Deps{}, http.MethodGet, "/metrics"); rec.Code != http.StatusNotFound {
+		t.Errorf("without a metrics handler: %d, want 404", rec.Code)
+	}
+	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("scc_up 1\n")) })
+	rec := serve(t, Deps{Metrics: h}, http.MethodGet, "/metrics")
+	if rec.Code != http.StatusOK || rec.Body.String() != "scc_up 1\n" {
+		t.Errorf("metrics: %d %q", rec.Code, rec.Body)
+	}
+}
+
 func TestUnknownRouteIs404(t *testing.T) {
 	rec := serve(t, Deps{}, http.MethodGet, "/nope")
 	if rec.Code != http.StatusNotFound {

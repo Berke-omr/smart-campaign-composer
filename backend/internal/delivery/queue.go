@@ -86,6 +86,10 @@ type Call struct {
 
 var outcomes = map[string]string{StatusSent: "sent", StatusRetrying: "retry", StatusFailed: "failed"}
 
+// Outcome is the decision as the attempt log records it: sent, retry or
+// failed.
+func (d Decision) Outcome() string { return outcomes[d.Status] }
+
 // Finish records a call and its consequence in one transaction: the attempt
 // row, and the delivery's new state. It reports false, and writes nothing,
 // when the row no longer carries the job's attempt: the lease ran out and
@@ -150,7 +154,7 @@ func (q *Queue) Finish(ctx context.Context, j Job, c Call, d Decision) (bool, er
 		                               http_status, outcome, error, retry_after, next_attempt_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::bigint * interval '1 millisecond', $11)`,
 		j.ID, j.CampaignID, string(j.Channel), j.Attempt, c.Started, c.Finished,
-		status, outcomes[d.Status], lastError, retryAfter, nextAttempt)
+		status, d.Outcome(), lastError, retryAfter, nextAttempt)
 	if err != nil {
 		return false, err
 	}

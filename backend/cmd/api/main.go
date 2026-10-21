@@ -21,6 +21,7 @@ import (
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/anthropic"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/mock"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/logging"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/metrics"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/segment"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/tracking"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/users"
@@ -80,6 +81,12 @@ func run() error {
 		return fmt.Errorf("mock scenario catalog: %w", err)
 	}
 
+	// Metrics (DECISIONS.md D25): the LLM attempts made here, and the
+	// deliveries table read when scraped. The worker serves its own.
+	reg := metrics.NewRegistry()
+	llmMetrics := metrics.NewLLM(reg)
+	metrics.RegisterDeliveries(reg, pool)
+
 	registry := segment.NewRegistry(cities)
 	counter := segment.NewCounter(pool)
 	var client llm.Client
@@ -93,7 +100,7 @@ func run() error {
 	}
 	campaigns := &campaign.Service{
 		Repo:      campaign.NewRepository(pool),
-		Generator: &llm.Generator{Client: client, AttemptTimeout: llmCfg.RequestTimeout},
+		Generator: &llm.Generator{Client: client, AttemptTimeout: llmCfg.RequestTimeout, Observe: llmMetrics.Observe},
 		Registry:  registry,
 		Audience:  counter,
 		LLMMode:   llmInfo.Mode,
@@ -117,6 +124,7 @@ func run() error {
 		DB:        pool,
 		Tracking:  tracking.NewReader(pool),
 		Stopping:  stopping,
+		Metrics:   metrics.Handler(reg, logger),
 	})
 	srv := &http.Server{
 		Addr:              httpCfg.Addr,

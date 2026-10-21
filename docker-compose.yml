@@ -96,6 +96,11 @@ services:
       PROVIDER_TIMEOUT: ${PROVIDER_TIMEOUT:-3s}
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-32}
       WORKER_LEASE: ${WORKER_LEASE:-30s}
+      HTTP_ADDR: ":8080" # /metrics
+    # The worker's /metrics, published on localhost for debugging like the
+    # mock provider (the api's is on :8081/metrics).
+    ports:
+      - "127.0.0.1:${WORKER_METRICS_HOST_PORT:-18091}:8080"
     depends_on:
       migrate:
         condition: service_completed_successfully

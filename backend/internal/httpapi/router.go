@@ -42,6 +42,8 @@ type Deps struct {
 	Stopping context.Context
 	// DB is pinged by /readyz; nil leaves the route out.
 	DB Pinger
+	// Metrics serves /metrics (Prometheus); nil leaves the route out.
+	Metrics http.Handler
 }
 
 // Pinger checks that the database answers. *pgxpool.Pool implements it.
@@ -86,6 +88,9 @@ func NewRouter(d Deps) http.Handler {
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	if d.Metrics != nil {
+		r.Method(http.MethodGet, "/metrics", d.Metrics)
+	}
 	// Readiness: the api can do its work only while the database answers.
 	if d.DB != nil {
 		r.Get("/readyz", func(w http.ResponseWriter, req *http.Request) {
