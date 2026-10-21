@@ -44,7 +44,9 @@ const family = computed(
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-field);
   border: var(--border-thin) solid var(--banner-border);
-  background: var(--banner-tint);
+  /* The tint over a glass base, so the ink keeps its contrast over the glows too. */
+  background-color: var(--color-glass);
+  background-image: linear-gradient(var(--banner-tint), var(--banner-tint));
 }
 
 .banner-icon {

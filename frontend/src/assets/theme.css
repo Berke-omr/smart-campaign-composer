@@ -40,6 +40,9 @@
   --color-field: rgb(255 255 255 / 35%);
   --color-glass-opaque: var(--color-white);
   --color-border-control: var(--color-text-secondary);
+  /* Supporting text: the secondary color reaches 4.5:1 on glass but not directly
+     on the page over the sky glow (3.99:1, measured), so text outside a card uses this. */
+  --color-text-supporting: color-mix(in srgb, var(--color-text-secondary) 75%, var(--color-text));
   --color-focus: var(--color-navy);
   --color-overlay: rgb(17 28 51 / 24%);
   --color-track: rgb(91 107 130 / 12%);
@@ -200,8 +203,9 @@
 
   /* ---- Layout ---- */
   --shell-inset: 20px;
-  --sidebar-width: 256px;
-  --sidebar-compact-width: 224px;
+  /* In rem (256px and 224px by default) so the navigation grows with the text size. */
+  --sidebar-width: 16rem;
+  --sidebar-compact-width: 14rem;
   --layout-gap: 24px;
   --breakpoint-compact: 1200px; /* documentation only, see the note at the top */
 

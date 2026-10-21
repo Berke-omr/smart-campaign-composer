@@ -80,7 +80,8 @@ const inactive = computed(() => props.disabled || props.loading)
   opacity: 1;
 }
 
-/* Primary: the AA gradient keeps white text at 4.5:1; the gloss stays above the text. */
+/* Primary: the AA gradient keeps white text at 4.5:1; the gloss stays in the top
+   quarter, above the text, so it never lightens the background behind the label. */
 .btn-primary {
   color: var(--color-white);
   background: linear-gradient(90deg, var(--color-primary-aa-start), var(--color-primary-aa-end));
@@ -90,7 +91,7 @@ const inactive = computed(() => props.disabled || props.loading)
 .btn-primary::before {
   content: '';
   position: absolute;
-  inset: 0 0 60% 0;
+  inset: 0 0 75% 0;
   border-radius: var(--radius-pill) var(--radius-pill) 0 0;
   background: linear-gradient(to bottom, rgb(255 255 255 / 22%), transparent);
   pointer-events: none;

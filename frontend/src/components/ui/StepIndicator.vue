@@ -63,7 +63,7 @@ defineProps<{ steps: Step[] }>()
 
 .label {
   font-size: var(--font-size-body);
-  color: var(--color-text-secondary);
+  color: var(--color-text-supporting);
   white-space: nowrap;
 }
 
@@ -90,8 +90,9 @@ defineProps<{ steps: Step[] }>()
   background: linear-gradient(135deg, var(--color-primary-start), var(--color-primary-end));
 }
 
+/* The coral marker is the accent; the label stays dark enough to read (3.6:1 in coral). */
 .current .label {
-  color: var(--color-primary-aa-start);
+  color: var(--color-text);
   font-weight: 600;
 }
 </style>

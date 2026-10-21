@@ -241,7 +241,7 @@ watch(reconnecting, (now, before) => {
   align-items: center;
   gap: var(--space-2);
   font-weight: var(--font-weight-label);
-  color: var(--color-text-secondary);
+  color: var(--color-text-supporting);
 }
 
 .conn-dot {
