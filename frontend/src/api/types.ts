@@ -92,6 +92,8 @@ export interface CampaignView {
   tone: Tone
   channels: Channel[]
   audience: Audience
+  /** The validated segment rule; `match` decides whether its conditions read "and" or "or". */
+  rule: { match: 'all' | 'any'; conditions: unknown[] }
   unsupported_criteria: string[]
   as_of: string
   llm: AppConfig['llm']

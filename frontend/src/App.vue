@@ -15,7 +15,9 @@ import TopBar from '@/components/layout/TopBar.vue'
     <div class="main-column">
       <TopBar />
       <main class="main">
-        <RouterView />
+        <!-- Keyed by path: /campaigns/20 → /campaigns/21 must load the other campaign,
+             not keep the first one's state in a reused component. -->
+        <RouterView :key="$route.path" />
       </main>
     </div>
   </div>
