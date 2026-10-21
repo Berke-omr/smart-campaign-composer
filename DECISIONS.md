@@ -17,7 +17,7 @@
 | D4 | Rate limiting: per channel, at most one send per 10 ms | Accepted (revised in P4: own spacer, not a token bucket) |
 | D5 | Exactly-once effect: unique constraint + provider idempotency key | Accepted (key is a UUID, P4) |
 | D6 | Retry policy | Accepted (429 budget added in P4) |
-| D7 | Live updates: SSE with periodic snapshots | Accepted |
+| D7 | Live updates: SSE with periodic snapshots | Accepted (built in P5, D25) |
 | D8 | Claude structured output: `output_config.format` | Accepted (verified in P3) |
 | D9 | Segment rule: flat, whitelisted JSON DSL | Accepted |
 | D10 | Two-layer validation + repair loop | Accepted (refusal retry added in P3) |
@@ -28,13 +28,14 @@
 | D15 | Content rules: length, variables, email format | Accepted (no emoji, after P4) |
 | D16 | Testing strategy | Accepted |
 | D17 | Frontend stack | Accepted (UI library to revisit in P6, see D22) |
-| D18 | Observability endpoints | Accepted |
+| D18 | Observability endpoints | Accepted (revised in P5: a metrics endpoint per process, D25) |
 | D19 | Migrations and seed run as one-shot compose services | Accepted (P1) |
 | D20 | Integration tests: one fresh database per test | Accepted (P1) |
 | D21 | How the segment engine is verified | Accepted (P2) |
 | D22 | Design reference: visual only; adopted additions | Accepted (before P3) |
 | D23 | LLM layer as built (P3) | Accepted (P3) |
 | D24 | Approval and delivery as built (P4) | Accepted (P4) |
+| D25 | Tracking as built (P5) | Accepted (P5) |
 
 ---
 
@@ -154,8 +155,11 @@
   state, so no "missed event" handling is needed. API and worker never talk directly; both only use
   Postgres.
 - **Trade-off:** One aggregate query per open dashboard per second. That is fine at this scale and
-  backed by an index on `(campaign_id, status)`. The frontend proxy must not buffer SSE
+  backed by an index on `(campaign_id, channel, status)`. The frontend proxy must not buffer SSE
   (`proxy_buffering off`).
+- **As built (P5, D25):** each second a snapshot is read in one transaction (counts, status, the
+  30-second sends-per-second series, recent issues) and sent whole; a finished campaign gets its
+  final snapshot and `delivery.done`, then the stream closes.
 
 ## D8 — Claude structured output: `output_config.format`
 
@@ -393,6 +397,9 @@
   - Counters: deliveries by channel/status, retries, 429s.
   - Histograms: LLM latency, provider latency.
   - Count of LLM validation failures and repairs.
+- **Revised in P5 (D25):** deliveries by channel and status are a *gauge* read from the database
+  (it is state, not a count of events); retries and 429s are labels of the worker's call counter.
+  The api and the worker each serve their own `/metrics`.
 
 ## D19 — Migrations and seed run as one-shot compose services
 
@@ -528,6 +535,37 @@ Decisions taken at the start of P4 (K1–K9). Evidence: PLAN.md → Verification
 - **Completion:** a periodic sweep finishes campaigns with no queued, sending or retrying rows, so a
   crash between a delivery's last call and the check only delays it.
 
+## D25 — Tracking as built (P5)
+
+Decisions taken at the start of P5 (K1–K6). Evidence: PLAN.md → Verification log → P5. Contract:
+[`docs/API.md`](docs/API.md) → Live dashboard, Health and metrics.
+
+| # | Topic | Decision | Why |
+|---|---|---|---|
+| K1 | Metrics topology | Each process serves its own `/metrics`. The worker counts its provider calls (by channel, result and HTTP status) and times them; the api counts and times its LLM attempts and reads `scc_deliveries` (by channel and status) from the database when scraped | Counting where the event happens is cheap and the latencies are real; state that lives in the database is right after any restart when read from it. The api never calls the worker, so D7's "only Postgres between them" holds. Rejected: everything derived from the database in the api (a full aggregate per scrape, histograms in SQL); everything in the worker (deliveries by status is state, not a counter) |
+| K2 | Library | `prometheus/client_golang` v1.24.1 | Correct text format, histograms and lint for free, plus Go runtime metrics (open streams show up in `go_goroutines`). v1.25.0 was 13 days old; v1.24.1 has had three months and a patch release. A hand-written exposition saves a dependency but risks escaping and bucket mistakes |
+| K3 | Snapshot and stream | A full snapshot at once, then every second; final snapshot + `delivery.done`, then close; `404` / `409` as JSON before the stream for an unknown or unapproved campaign; `retry: 3000` | Idempotent snapshots make reconnects trivial (D7). `EventSource` reopens any closed stream, so the end needs an event of its own; it does not reopen after a non-200 answer, so errors before the stream are final. A finished campaign answers with its state and `done` at once, so the dashboard of a finished campaign uses the same stream |
+| K4 | Recent issues | Structured fields (`kind`, `code`, `outcome`, `retry_in_ms`, `at`, raw `error`); the UI writes the sentence | The classification is the retry policy's (D6), so it belongs to the backend; the sentence and the age ("now", "3s") are presentation and change every second anyway. `kind` comes from the HTTP status alone (`no_answer` when there is none), so no error string is parsed and the schema did not change |
+| K5 | Clock of the window | The api's Go clock, whole Unix seconds, `[from, to)`, ending one second before the current one; a finished campaign's window ends with its last call | `started_at` comes from the worker's Go clock and the database's `now()` runs ~1.8 ms behind (D24), so the two are never mixed. A call is logged when it ends, so the newest second is incomplete; one settling second makes each point final when shown, except a timeout logged up to 3 s later. Anchoring a finished campaign keeps its chart ("keep chart and issue history") |
+| K6 | Streams at shutdown | When the api begins to shut down it cancels every open stream (dashboard and drafts) through `http.Server.RegisterOnShutdown`; other requests get `HTTP_SHUTDOWN_TIMEOUT=8s` inside a 10 s compose grace period | `Shutdown` waits for open requests and never cancels them, so one open dashboard held the shutdown for its whole timeout, and Docker killed the api after 1 s on the development machine. A draft stream ends exactly as if its client had left (nothing unfinished is stored) |
+
+- **One transaction per snapshot:** a repeatable-read, read-only transaction, so the status, the counts and
+  the series belong to the same moment (a campaign never shows `completed` next to a message still retrying).
+- **The loop stops** when the request's context ends (client gone, or shutdown) or when a write fails; each
+  is tested on its own. A failed snapshot is sent as `delivery.error` and retried on the next tick.
+- **Calls, not messages, per second:** the series and the gauge count provider calls started, retries and
+  429s included, because the 100/s limit is on calls (D4). Calls cut short by a crash or a stop are not
+  logged and therefore not counted (rare; see P4).
+- **Hooks instead of imports:** `llm.Generator` and `delivery.Worker` report through an `Observe` function,
+  so neither package depends on Prometheus. An LLM attempt cut short because the client left is not
+  reported.
+- **Reconnecting is the client's job after a `502`:** while the api restarts nginx answers `502`, and
+  `EventSource` gives up for good after a non-200 answer. P6 reopens the stream itself (the design's
+  "Reconnecting…").
+- **Not built:** a Prometheus server or Grafana in the compose file (the endpoints are there to scrape),
+  a per-stream metric, and an index for "recent issues" (it reads at most a campaign's attempts through
+  the existing `(campaign_id, started_at)` index).
+
 ---
 
 ## Assumptions
@@ -562,6 +600,7 @@ Resolved for now with working assumptions; revisit before submission.
 
 Authentication and multi-tenancy · delivery-receipt webhooks · quiet hours and frequency capping ·
 GSM-7/UCS-2 segment billing · horizontal scaling of the worker (shared rate limiter) ·
+a Prometheus server or dashboards (the `/metrics` endpoints are ready to scrape) ·
 field-to-field segment conditions · re-checking consent between approval and send (the audience is
 frozen at approval) · pausing or cancelling a campaign that is sending · a mock provider that
 remembers keys across restarts.
