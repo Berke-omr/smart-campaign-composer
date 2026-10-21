@@ -24,6 +24,13 @@ function json(status: number, body: unknown): Response {
 }
 
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>
+/** Answers for every request except the recent-campaigns list, in order. */
+let answers: (Response | Error)[]
+let recent: unknown[]
+
+/** The calls other than GET /api/campaigns (the recent list). */
+const calls = () =>
+  fetchMock.mock.calls.filter(([url, init]) => !(url === '/api/campaigns' && !init?.body))
 
 async function setup() {
   const router = createRouter({ history: createMemoryHistory(), routes })
@@ -34,7 +41,15 @@ async function setup() {
 }
 
 beforeEach(() => {
-  fetchMock = vi.fn<typeof fetch>()
+  answers = []
+  recent = []
+  fetchMock = vi.fn<typeof fetch>((url, init) => {
+    if (url === '/api/campaigns' && !init?.body) {
+      return Promise.resolve(json(200, { campaigns: recent }))
+    }
+    const next = answers.shift() ?? json(500, { error: 'internal error' })
+    return next instanceof Error ? Promise.reject(next) : Promise.resolve(next)
+  })
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -45,7 +60,7 @@ afterEach(() => {
 
 describe('ComposerView', () => {
   it('sends the brief, the channels and the tone, then opens the draft', async () => {
-    fetchMock.mockResolvedValue(json(201, { id: 7 }))
+    answers = [json(201, { id: 7 })]
     const { wrapper, router } = await setup()
     const generate = wrapper.get('button[type="submit"]')
     expect(generate.attributes('disabled')).toBeDefined()
@@ -56,8 +71,9 @@ describe('ComposerView', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    const [url, init] = fetchMock.mock.calls[0]!
+    const [url, init] = calls()[0]!
     expect(url).toBe('/api/campaigns')
+    expect(init?.method).toBe('POST')
     expect(JSON.parse(String(init?.body))).toEqual({
       brief: 'İstanbul’daki kullanıcılara %30 indirim',
       channels: ['sms', 'email'],
@@ -90,14 +106,14 @@ describe('ComposerView', () => {
   })
 
   it('fills the form from the brief library', async () => {
-    fetchMock.mockResolvedValue(json(200, examples))
+    answers = [json(200, examples)]
     const { wrapper } = await setup()
     await wrapper
       .findAll('button')
       .find((b) => b.text() === 'Brief library')!
       .trigger('click')
     await flushPromises()
-    expect(fetchMock.mock.calls[0]![0]).toBe('/api/briefs/examples')
+    expect(calls()[0]![0]).toBe('/api/briefs/examples')
 
     await wrapper.get('.example').trigger('click')
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe(
@@ -111,12 +127,12 @@ describe('ComposerView', () => {
   })
 
   it('shows why no audience could be built, and keeps the brief', async () => {
-    fetchMock.mockResolvedValue(
+    answers = [
       json(422, {
         error: 'could not build an audience from this brief (3 attempts)',
         details: ['condition 1: unknown field "gender"'],
       }),
-    )
+    ]
     const { wrapper, router } = await setup()
     await wrapper.get('textarea').setValue('kadın kullanıcılar')
     await wrapper.get('form').trigger('submit')
@@ -132,8 +148,7 @@ describe('ComposerView', () => {
   })
 
   it('offers to try again when the server cannot be reached', async () => {
-    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'))
-    fetchMock.mockResolvedValueOnce(json(201, { id: 9 }))
+    answers = [new TypeError('Failed to fetch'), json(201, { id: 9 })]
     const { wrapper, router } = await setup()
     await wrapper.get('textarea').setValue('Bir brief')
     await wrapper.get('form').trigger('submit')
@@ -146,5 +161,37 @@ describe('ComposerView', () => {
       .trigger('click')
     await flushPromises()
     expect(router.currentRoute.value.fullPath).toBe('/campaigns/9')
+  })
+
+  it('lists the four most recent campaigns, each opening the right screen', async () => {
+    const summary = (id: number, status: string) => ({
+      id,
+      name: `Campaign ${id}`,
+      status,
+      channels: ['sms'],
+      audience: { total: 1000 + id },
+      created_at: '',
+    })
+    recent = [
+      summary(5, 'sending'),
+      summary(4, 'completed'),
+      summary(3, 'ready'),
+      summary(2, 'draft'),
+      summary(1, 'failed'),
+    ]
+    const { wrapper } = await setup()
+    const cards = wrapper.findAll('[data-testid="campaign-card"]')
+    expect(cards.map((c) => c.attributes('href'))).toEqual([
+      '/campaigns/5/live',
+      '/campaigns/4/live',
+      '/campaigns/3',
+      '/campaigns/2',
+    ])
+    expect(cards[0]!.text()).toContain('1,005 people')
+    expect(cards[0]!.text()).toContain('In progress')
+    expect(cards[0]!.text()).not.toMatch(/\d+%/)
+    expect(cards[1]!.text()).toContain('100% done')
+    expect(cards[2]!.text()).toContain('Not sent yet')
+    expect(wrapper.findAll('a').some((a) => a.text() === 'All campaigns')).toBe(true)
   })
 })

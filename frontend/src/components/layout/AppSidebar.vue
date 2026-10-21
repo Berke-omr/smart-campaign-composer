@@ -7,8 +7,11 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 
 const route = useRoute()
 
-// "New campaign" stays active while a campaign is being drafted or reviewed.
+// "New campaign" stays active while a campaign is being drafted or reviewed;
+// "Live sends" while a dashboard is open.
 const composing = computed(() => route.name === 'composer' || route.name === 'campaign')
+const listing = computed(() => route.name === 'campaigns')
+const watching = computed(() => route.name === 'campaign-live' || route.name === 'live-sends')
 </script>
 
 <template>
@@ -39,6 +42,26 @@ const composing = computed(() => route.name === 'composer' || route.name === 'ca
       >
         <AppIcon name="plus" />
         New campaign
+      </RouterLink>
+
+      <p class="nav-heading caption">Main</p>
+      <RouterLink
+        to="/campaigns"
+        class="nav-item"
+        :class="{ active: listing }"
+        :aria-current="listing ? 'page' : undefined"
+      >
+        <AppIcon name="chart" />
+        Campaigns
+      </RouterLink>
+      <RouterLink
+        to="/live"
+        class="nav-item"
+        :class="{ active: watching }"
+        :aria-current="watching ? 'page' : undefined"
+      >
+        <AppIcon name="send" />
+        Live sends
       </RouterLink>
     </nav>
   </aside>

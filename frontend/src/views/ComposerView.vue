@@ -4,9 +4,17 @@
 // and opens it; the messages are written on the draft screen.
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { createCampaign, fetchCampaign, fetchExamples } from '@/api/campaigns'
+import { createCampaign, fetchCampaign, fetchCampaigns, fetchExamples } from '@/api/campaigns'
 import { ApiError, isUnreachable } from '@/api/client'
-import { CHANNELS, TONES, type BriefExample, type Channel, type Tone } from '@/api/types'
+import {
+  CHANNELS,
+  TONES,
+  type BriefExample,
+  type CampaignSummary,
+  type Channel,
+  type Tone,
+} from '@/api/types'
+import CampaignGrid from '@/components/campaign/CampaignGrid.vue'
 import AppBanner from '@/components/ui/AppBanner.vue'
 import AppButton from '@/components/ui/AppButton.vue'
 import AppChip from '@/components/ui/AppChip.vue'
@@ -110,6 +118,20 @@ function useExample(example: BriefExample) {
   briefField.value?.focus()
 }
 
+// ---- Recent campaigns (GET /api/campaigns, newest first) ----
+
+const recent = ref<CampaignSummary[] | null>(null)
+const recentFailed = ref(false)
+const RECENT = 4
+
+onMounted(async () => {
+  try {
+    recent.value = await fetchCampaigns()
+  } catch {
+    recentFailed.value = true
+  }
+})
+
 // "Edit brief" on the draft screen comes back here with ?from=<campaign id>.
 onMounted(async () => {
   const from = Number(route.query.from)
@@ -196,6 +218,25 @@ onMounted(async () => {
         <AppButton variant="secondary" :loading="generating" @click="generate">Try again</AppButton>
       </template>
     </AppBanner>
+
+    <section class="recent" aria-labelledby="recent-title">
+      <div class="recent-head">
+        <h2 id="recent-title">Recent campaigns</h2>
+        <AppButton
+          v-if="recent && recent.length > RECENT"
+          variant="ghost"
+          :to="{ name: 'campaigns' }"
+        >
+          All campaigns
+        </AppButton>
+      </div>
+      <p v-if="recentFailed" class="secondary-text">Recent campaigns could not be loaded.</p>
+      <p v-else-if="!recent" class="secondary-text" role="status">Loading campaigns…</p>
+      <p v-else-if="recent.length === 0" class="secondary-text">
+        No campaigns yet. Your first one will appear here.
+      </p>
+      <CampaignGrid v-else :campaigns="recent.slice(0, RECENT)" />
+    </section>
 
     <AppDialog :open="libraryOpen" title="Brief library" @close="libraryOpen = false">
       <p class="secondary-text">
@@ -323,6 +364,19 @@ onMounted(async () => {
 
 .chip-select select:focus-visible {
   outline: none; /* the whole chip shows the ring */
+}
+
+.recent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
 }
 
 .details {
