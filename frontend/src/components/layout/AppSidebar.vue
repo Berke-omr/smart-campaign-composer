@@ -119,7 +119,11 @@ nav {
   border-radius: var(--radius-field);
   text-decoration: none;
   color: var(--color-text);
-  transition: background-color var(--duration-fast) var(--ease-ui);
+  /* Text and background change together; changing only the background left the
+     label unreadable for a moment when the active item moved (dark on navy). */
+  transition:
+    background-color var(--duration-fast) var(--ease-ui),
+    color var(--duration-fast) var(--ease-ui);
 }
 
 .nav-item:hover {
