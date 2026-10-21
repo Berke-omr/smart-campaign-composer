@@ -70,7 +70,10 @@ function onCancel(e: Event) {
   max-height: calc(100vh - 2 * var(--space-8));
   padding: var(--space-6);
   color: var(--color-text);
-  background: var(--color-glass-hover);
+  /* Opaque: a dialog sits over text, and through 72% white the cards behind it
+     stayed readable and competed with its content (seen where backdrop blur
+     was not applied). Border, radius and shadow keep the glass look. */
+  background: var(--color-glass-opaque);
   box-shadow: var(--shadow-raised), var(--shadow-highlight);
   overflow: auto;
 }
