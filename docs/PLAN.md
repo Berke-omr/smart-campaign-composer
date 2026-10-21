@@ -21,8 +21,8 @@
 | P3 | LLM layer | ✅ done (PR, branch `feat/p3-llm`) | 2026-10-19 |
 | P4 | Approval & delivery pipeline | ✅ done (PR, branch `feat/p4-delivery`) | 2026-10-20 |
 | P5 | Tracking (SSE, metrics, health) | ✅ done (PR, branch `feat/p5-tracking`) | 2026-10-21 |
-| P6 | Frontend | ⏳ next | — |
-| P7 | Hardening & submission | ⬜ | — |
+| P6 | Frontend | ✅ done, in review (branch `feat/p6-frontend`) | 2026-10-21 |
+| P7 | Hardening & submission | ⏳ next | — |
 | P8 | Bonus (optional) | ⬜ | — |
 
 ---
@@ -688,3 +688,103 @@ code's own list of statuses. The test now lists them itself (commit `test(metric
 - Estimate: 3 h in the plan, revised to about 8 h when P5 started (two endpoints, shutdown behaviour, depth of
   verification).
 
+### P6
+
+Everything below ran against the live stack with the mock LLM (`LLM_PROVIDER=mock`, `/api/config` checked before
+creating campaigns), first through Vite's dev server and at the end through the production build behind nginx
+(`:8080`). No paid call was made.
+
+**Done criteria:**
+
+| Criterion | Evidence | Result |
+|---|---|---|
+| The whole flow works in the browser with the mock LLM | production build: Brief library → "Cart reminder — İstanbul" → Generate → draft → Review & approve → Send messages → dashboard | SMS valid after ~1.0 s while the email was still being written, email valid at ~1.8 s, status Ready; approval opened the dashboard, which ended Completed with 213 of 213 done (SMS 89 sent, 1 failed; email 123 sent) and its chart and issues kept |
+| An over-limit edit is refused by the backend and shown in the UI | `[test] Every SMS answer is 200 characters long…` → SMS "Needs manual edit" → Edit → Save as it was | `422`; next to the field: "text is 201 characters with the longest values in this audience filled in ({{first_name}} = "Muhammed Emin", 13 characters); the limit is 160. Shorten it by at least 41 characters."; the counter showed "41 over limit 201 / 160" before saving. A shortened text with `{{first_name}}` inserted at the caret saved as Valid (79 / 160) and the campaign became Ready |
+| The dashboard follows the stream, shows Reconnecting… during `docker compose stop api` / `start api`, and carries on without resetting | weekend sale, 3,714 emails; the page's numbers sampled every 200 ms | live 150 → 826 done; Reconnecting… within about a second of `docker compose stop api`, banner "Showing the last update from 15:03:28", numbers kept at 826; after `start api` four `502`s (backoff), then live again at 2,458; never lower than before; Completed at 3,714 (3,683 sent, 31 failed). No request after `delivery.done` |
+| The counter equals the backend's `worst_case_length` (test) | `content.spec.ts`: the port against 720 answers recorded from the live api by `scripts/record-worst-case.mjs` | equal for all 720 (broken variables, Turkish letters, combining marks, characters outside the BMP, SMS text and email subject, two audiences with three sets of longest values). Live: SMS 109 / 160 and subject 46 / 80 on screen = the report's 109 and 46; `audience.longest_values` = each report's `longest_values` |
+| Vitest tests for the draft stream and snapshot logic, plus component tests; `make test` green | `make test` | exit 0: 16 Go packages (`-race`, Postgres); frontend `vue-tsc --build`, then 12 files / 108 tests |
+| 1440 and 1024 px layouts, keyboard and focus, reduced motion | in-app browser | see below; reduced motion could not be emulated there |
+
+**The draft states on screen** (VIP thanks — İzmir, the SMS repaired on attempt 2, recorded with a `MutationObserver`):
+SMS Writing… with the counter growing, "Near limit" at 146, "18 over limit" at 178, Validating…, "Fixing… · attempt 2
+of 3" with the old text kept, the new attempt's text replacing it from 3 / 160, Validating…, Valid at 109 / 160; the email
+became Valid while the SMS was being fixed. `[test] The SMS is declined twice…`: "Needs manual edit" with the refusal's
+category, "No text yet.", Review & approve disabled with the reason in words.
+
+**Layout and accessibility (in-app browser):**
+- 1440 and 1024 px: composer, draft, confirm dialog, dashboard, campaign list; at 1024 the draft columns, the channel
+  cards and chart/issues stack (one 736 px column), the list has two columns and the dialog fits (640 px); no
+  horizontal overflow (`scrollWidth = clientWidth`) on any of them.
+- 200% text (root font size doubled) at 1024 px: no overflow; the sidebar's items were cut off ("Compo", "Campai"),
+  so its widths are now in rem; afterwards no element in it overflows.
+- Keyboard: Tab order brand → New campaign → Campaigns → Live sends → brief → SMS → Email → Tone → Brief library →
+  campaign cards, each with the 2 px focus ring (the tone chip draws it with `:focus-within`); in the dialog focus
+  stays inside, Escape closes it and focus returns to the button that opened it.
+- Contrast, every text color composited over its glass layers and over the strongest glow (sky at 70%), AA 4.5:1:
+  three pairs failed and were fixed (D26): secondary text on the page 3.99 → 5.48, the current step label 3.61 →
+  13.14, the amber banner 4.20 → 4.92. Others, worst case: secondary on glass 4.74, white on the AA gradient 4.90 /
+  5.81, status pills 4.92–7.75, counter near/over 5.59 / 9.70, variable pills 6.07 / 7.30.
+- Fonts: a Turkish page loads Inter and Urbanist latin-ext; `document.fonts.check` is true for "İzmir" in Urbanist
+  and "ğşıİüöçâ" in Inter; counters use JetBrains Mono.
+- Reduced motion: the `prefers-reduced-motion: reduce` rule (no animations or transitions) is in the loaded CSS, but
+  the in-app browser cannot emulate the setting (`matchMedia` stays false). To be checked with macOS "Reduce motion".
+
+**Mutation checks.** Same procedure as P5, with a scratch script: clean tree, the replacement applied exactly once,
+the mutant passes `vue-tsc --build` and `vite build` (`go build` and `go vet` for the backend), the whole suite runs
+unfiltered with its full log kept, then the file is restored, compared with its backup (`cmp`) and `git status` must
+be clean.
+
+| Mutation | Caught by |
+|---|---|
+| a draft delta is appended instead of replacing | `replaces a field with each delta instead of appending` |
+| fixing clears the text at once | `keeps the old text while fixing, then the new attempt replaces all of it` |
+| a late delta of a replaced attempt is applied | `ignores a late delta of an attempt that was already replaced` |
+| the counter uses `str.length` (UTF-16 units) | `counts code points, not UTF-16 units` + the 720 recorded answers |
+| the counter uses the template, not the worst case | the recorded answers + 2 `worstCaseLength` tests |
+| `{{ first_name }}` is filled in like a variable | `keeps text that is not a valid variable exactly as written` + the recorded answers |
+| "Near limit" only above 90% | `144 of 160 is near`, `72 of 80 is near` |
+| the done event does not close the stream | `closes the stream on the done event and never reopens it` |
+| CLOSED is left to the browser (no own reconnect) | `reopens the stream itself after the browser gave up…`, `stops when the check says…` |
+| the backoff is not reset by a received event | `reopens the stream itself after the browser gave up, with growing waits` |
+| an issue's age is measured with the browser clock | `is measured against the snapshot's own time` |
+| a failed 429/503/timeout reads "retrying" | 3 `issueText` cases |
+| progress may read 100% before the end | `231 of 232 reads 99 percent` |
+| ordinary spline tangents | `never draws above the highest sample` |
+| (api) raw longest values instead of the worst case | `TestViewHasLongestValuesPerChannel` (fallback when every name is shorter) |
+| (api) every channel instead of the selected ones | `TestViewHasLongestValuesPerChannel` (SMS-only campaign) |
+| (api) only channels that already have a message | `TestViewHasLongestValuesPerChannel` (before drafting) |
+| a loading button stays pressable | `confirms with the final numbers and approves once…` |
+| `approve()` without its guard | **survived** at first (the disabled button hid it); now `approves once even if the dialog confirms twice…` |
+| the dashboard never replaces its first snapshot | `keeps the last numbers while reconnecting, then replaces them` |
+| "Waiting for fresh data" is never cleared | `marks the numbers as old when a snapshot could not be read` |
+| a ready campaign is not sent back from the dashboard | `sends a campaign that is not approved yet back to its draft` |
+| a 422 report is not shown at the fields | `shows a rejected edit next to its field and keeps the text` |
+| approval allowed while a message is being edited | `blocks approval while a message is being edited` |
+| the draft stream opens although every message is stored | 4 `CampaignDraftView` tests |
+
+*Invalid attempts, not counted:* one replacement matched two places in `CampaignLiveView.vue` (the script refused it);
+its next form (`'draft' && 'ready'`) did not compile (`TS2367`, no overlap). The compiling form (`'draft'` only) is in
+the table.
+
+**Repeated runs:** the timing-based tests use fake timers; the whole Vitest suite was run five times in a row after
+S2 and after S6 and three times after S4 and S7, every run green.
+
+**Problems found while verifying, and fixed:**
+- *A reused screen:* going from `/campaigns/20` to `/campaigns/21` kept campaign 20 on screen, because the router
+  reused the component. The router view is now keyed by path.
+- *Contrast and 200% text:* see above.
+- *The nav item went unreadable for 160 ms* after approving (the background changed slowly, the text color at once).
+- *The confirm dialog let the cards behind it show through* its 72% white where the browser did not apply the
+  backdrop blur; the dialog is now opaque.
+- *Legend numbers read as "Sent844"* to a screen reader (no space between the label and the count).
+- *Extra `/events` requests* in one network log turned out to be Vite reloading the open dashboard while its file was
+  being written; a fresh load opens one stream for a finished campaign and nothing more.
+
+**Deviations from the P6 plan** (approved before implementation, D26):
+- Backend: the campaign view gained `audience.longest_values`, `content.worstValues` became `WorstCaseValues`, a Go
+  test was added, and docs/API.md documents the field.
+- `make test` type-checks the frontend first (`frontend/Dockerfile`).
+- New dependencies: the three `@fontsource-variable` packages, 5.3.0 (published 2026-07-19).
+- New files beyond the plan: `scripts/record-worst-case.mjs` and its fixture, a Vitest setup file (jsdom's `<dialog>`
+  has no `showModal`).
+- Estimate: 18.5 h planned for S1–S9; P6 was finished on 2026-10-21.
