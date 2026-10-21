@@ -68,10 +68,22 @@ func (s *sse) emit(event string, data any) error {
 	return nil
 }
 
+// streamContext is the request's context, also cancelled when the server
+// begins to shut down: http.Server.Shutdown waits for open requests, and a
+// stream would hold it until its timeout.
+func (d Deps) streamContext(r *http.Request) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(r.Context())
+	if d.Stopping == nil {
+		return ctx, cancel
+	}
+	stop := context.AfterFunc(d.Stopping, cancel)
+	return ctx, func() { stop(); cancel() }
+}
+
 // streamEvents is the live dashboard of a sending campaign (DECISIONS.md D7,
 // D25): a full snapshot at once, then one every SnapshotEvery. When the
 // campaign is finished it sends the final snapshot and delivery.done, then
-// closes. The loop ends as soon as the client leaves.
+// closes. The loop ends as soon as the client leaves or the server stops.
 func (d Deps) streamEvents(w http.ResponseWriter, r *http.Request) {
 	id, ok := campaignID(w, r)
 	if !ok {
@@ -83,7 +95,8 @@ func (d Deps) streamEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out.retryMS = reconnectMS
-	ctx := r.Context()
+	ctx, cancel := d.streamContext(r)
+	defer cancel()
 
 	s, err := d.Tracking.Snapshot(ctx, id, d.Now())
 	switch {

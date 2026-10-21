@@ -158,7 +158,11 @@ func (d Deps) streamDrafts(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, d.Logger, errors.New("response writer cannot flush"))
 		return
 	}
-	if err := d.Campaigns.StreamDrafts(r.Context(), id, out.emit); err != nil {
+	// When the server stops, writing ends as if the client had left: nothing
+	// unfinished is stored, and the reopened stream starts those channels over.
+	ctx, cancel := d.streamContext(r)
+	defer cancel()
+	if err := d.Campaigns.StreamDrafts(ctx, id, out.emit); err != nil {
 		if out.started {
 			d.Logger.Error("draft stream failed", "campaign", id, "err", err)
 			_ = out.emit(campaign.EventError, map[string]string{"message": "the drafts could not be written"})

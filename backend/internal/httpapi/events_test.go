@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +19,9 @@ import (
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/config"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/content"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/delivery"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/httpx"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/mock"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/logging"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/mockprovider"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/seed"
@@ -529,4 +533,109 @@ func TestLiveDashboardDuringASend(t *testing.T) {
 		t.Errorf("busiest 1 s window of the log holds %d calls", busiest)
 	}
 	t.Logf("busiest half-open 1 s window: %d calls", busiest)
+}
+
+// serveStoppable serves d as cmd/api does: when the shutdown begins, the
+// server cancels Stopping. shutdown starts it and returns Serve's result,
+// which is an error when open requests outlast the 5 s shutdown timeout.
+func serveStoppable(t *testing.T, d Deps) (base string, shutdown func() error) {
+	t.Helper()
+	stopping, stopStreams := context.WithCancel(context.Background())
+	t.Cleanup(stopStreams)
+	d.Stopping = stopping
+	srv := &http.Server{Handler: NewRouter(d)}
+	srv.RegisterOnShutdown(stopStreams)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	served := make(chan error, 1)
+	go func() { served <- httpx.Serve(ctx, srv, ln, 5*time.Second, logging.Discard()) }()
+	return "http://" + ln.Addr().String(), func() error {
+		cancel()
+		select {
+		case err := <-served:
+			return err
+		case <-time.After(30 * time.Second):
+			return errors.New("Serve has not returned 30 s after the shutdown began")
+		}
+	}
+}
+
+// TestShutdownEndsDashboardStreams: an open dashboard stream ends when the
+// api shuts down, so the shutdown completes instead of running into its
+// timeout. The stream ends without delivery.done, and the browser reconnects.
+func TestShutdownEndsDashboardStreams(t *testing.T) {
+	f := &fakeTracking{script: []result{snap("sending", 1)}}
+	base, shutdown := serveStoppable(t, Deps{Logger: logging.Discard(), Tracking: f, SnapshotEvery: 10 * time.Millisecond})
+	resp, err := client.Get(base + "/api/campaigns/1/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	r := newSSEReader(resp.Body)
+	for e, ok := r.next(); e.name != EventSnapshot; e, ok = r.next() {
+		if !ok {
+			t.Fatal("the stream ended before its first snapshot")
+		}
+	}
+
+	if err := shutdown(); err != nil {
+		t.Fatalf("shutdown with an open dashboard: %v", err)
+	}
+	for e, ok := r.next(); ok; e, ok = r.next() {
+		if e.name == EventDone {
+			t.Error("delivery.done sent on shutdown; the campaign is still sending")
+		}
+	}
+}
+
+// TestShutdownEndsDraftStreams: an open draft stream ends when the api shuts
+// down, as if its client had left: the shutdown completes, no draft.done is
+// sent and nothing unfinished is stored.
+func TestShutdownEndsDraftStreams(t *testing.T) {
+	d := campaignDeps(t, mock.Options{ChunkDelay: 5 * time.Millisecond, ChunkRunes: 1})
+	base, shutdown := serveStoppable(t, d)
+	resp, body := do(t, http.MethodPost, base+"/api/campaigns",
+		fmt.Sprintf(`{"brief":%q,"channels":["sms","email"],"tone":"friendly"}`, sampleBrief))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create: %d %s", resp.StatusCode, body)
+	}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := client.Get(fmt.Sprintf("%s/api/campaigns/%d/draft/stream", base, created.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	r := newSSEReader(stream.Body)
+	for e, ok := r.next(); e.name != llm.EventDelta; e, ok = r.next() {
+		if !ok {
+			t.Fatal("the stream ended before the first text arrived")
+		}
+	}
+
+	if err := shutdown(); err != nil {
+		t.Fatalf("shutdown with an open draft stream: %v", err)
+	}
+	for e, ok := r.next(); ok; e, ok = r.next() {
+		if e.name == "draft.done" {
+			t.Error("draft.done sent although the drafts were cut off")
+		}
+	}
+	v, err := d.Campaigns.Get(context.Background(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ch, m := range v.Messages {
+		if m != nil {
+			t.Errorf("%s stored after the shutdown cut it off: %+v", ch, m)
+		}
+	}
 }

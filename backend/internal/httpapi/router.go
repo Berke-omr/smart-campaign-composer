@@ -36,6 +36,10 @@ type Deps struct {
 	Tracking Snapshotter
 	// SnapshotEvery is the dashboard stream's interval; 0 means one second.
 	SnapshotEvery time.Duration
+	// Stopping is cancelled when the server begins to shut down, and every
+	// open stream (drafts, dashboard) ends then; the browser reconnects to
+	// the next api. nil: streams end only when their client leaves.
+	Stopping context.Context
 	// DB is pinged by /readyz; nil leaves the route out.
 	DB Pinger
 }

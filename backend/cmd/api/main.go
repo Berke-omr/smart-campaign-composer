@@ -102,6 +102,10 @@ func run() error {
 		Now:       time.Now,
 	}
 
+	// Cancelled when the server begins to shut down, so open streams end
+	// instead of holding the shutdown until its timeout.
+	stopping, stopStreams := context.WithCancel(context.Background())
+	defer stopStreams()
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Logger:    logger,
 		UserStats: userRepo,
@@ -112,6 +116,7 @@ func run() error {
 		Campaigns: campaigns,
 		DB:        pool,
 		Tracking:  tracking.NewReader(pool),
+		Stopping:  stopping,
 	})
 	srv := &http.Server{
 		Addr:              httpCfg.Addr,
@@ -120,5 +125,6 @@ func run() error {
 		// No WriteTimeout on purpose: SSE responses (live drafts, dashboard)
 		// stay open for minutes.
 	}
+	srv.RegisterOnShutdown(stopStreams)
 	return httpx.ListenAndServe(ctx, srv, httpCfg.ShutdownTimeout, logger)
 }
