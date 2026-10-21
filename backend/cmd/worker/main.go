@@ -23,9 +23,6 @@ import (
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/logging"
 )
 
-// MessagesPerSecond is the case's limit, per channel (R10).
-const MessagesPerSecond = 100
-
 func main() {
 	if err := run(); err != nil {
 		slog.Error("worker exited with error", "err", err)
@@ -56,13 +53,13 @@ func run() error {
 		Client:       &delivery.Client{BaseURL: cfg.ProviderURL, HTTP: &http.Client{Timeout: cfg.ProviderTimeout}},
 		Policy:       delivery.DefaultPolicy,
 		Logger:       logger,
-		PerSecond:    MessagesPerSecond,
+		PerSecond:    delivery.MessagesPerSecond,
 		Senders:      cfg.Senders,
 		Batch:        10,
 		Poll:         200 * time.Millisecond,
 		DrainTimeout: 8 * time.Second, // inside docker stop's 10 s grace period
 	}
-	logger.Info("worker started", "provider", cfg.ProviderURL, "per_second", MessagesPerSecond,
+	logger.Info("worker started", "provider", cfg.ProviderURL, "per_second", delivery.MessagesPerSecond,
 		"senders_per_channel", cfg.Senders, "provider_timeout", cfg.ProviderTimeout.String(), "lease", cfg.Lease.String())
 	w.Run(ctx)
 	logger.Info("worker stopped")
