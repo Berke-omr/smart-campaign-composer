@@ -5,13 +5,16 @@ import { onBeforeUnmount, ref } from 'vue'
 import { draftStreamURL } from '@/api/campaigns'
 import type {
   CampaignView,
+  Channel,
   DraftDeltaEvent,
   DraftDoneEvent,
   DraftErrorEvent,
   DraftStateEvent,
+  MessageView,
 } from '@/api/types'
 import {
   applyDraftEvent,
+  fromMessageView,
   initialProgress,
   needsDrafting,
   type DraftEvent,
@@ -61,6 +64,14 @@ export function useDraftStream(id: number, options: DraftStreamOptions) {
     })
   }
 
+  /** A message the marketer saved: its card shows the stored version and its report. */
+  function setMessage(channel: Channel, m: MessageView) {
+    progress.value = {
+      ...progress.value,
+      channels: { ...progress.value.channels, [channel]: fromMessageView(channel, m) },
+    }
+  }
+
   function stop() {
     handle?.close()
     handle = null
@@ -73,6 +84,7 @@ export function useDraftStream(id: number, options: DraftStreamOptions) {
     connection,
     start,
     stop,
+    setMessage,
     retryNow: () => handle?.retryNow(),
   }
 }

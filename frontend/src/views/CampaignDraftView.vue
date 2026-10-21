@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // Draft and review of one campaign (02 — Draft): the brief, the audience,
-// and the messages streaming in. Approved campaigns open their dashboard.
-import { computed, onMounted, ref } from 'vue'
+// and the messages streaming in; then editing, and the confirmation that
+// starts sending. Approved campaigns open their dashboard.
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { fetchCampaign } from '@/api/campaigns'
+import { approveCampaign, fetchCampaign } from '@/api/campaigns'
 import { ApiError, isUnreachable } from '@/api/client'
-import type { CampaignView } from '@/api/types'
+import type { CampaignView, Channel, Report, SaveMessageResponse } from '@/api/types'
 import AudienceCard from '@/components/campaign/AudienceCard.vue'
+import ConfirmSendModal from '@/components/campaign/ConfirmSendModal.vue'
 import MessageCard from '@/components/campaign/MessageCard.vue'
 import AppBanner from '@/components/ui/AppBanner.vue'
 import AppButton from '@/components/ui/AppButton.vue'
@@ -96,11 +98,40 @@ const allFinal = computed(() =>
   }),
 )
 
+// ---- Editing ----
+
+/** Channels with an edit in progress; their last validation no longer describes the text. */
+const editing = reactive(new Set<Channel>())
+
+function onEditing(channel: Channel, on: boolean) {
+  if (on) editing.add(channel)
+  else editing.delete(channel)
+}
+
+function onSaved(channel: Channel, res: SaveMessageResponse) {
+  if (!campaign.value) return
+  campaign.value = {
+    ...campaign.value,
+    status: res.status,
+    messages: { ...campaign.value.messages, [channel]: res.message },
+  }
+  drafts.setMessage(channel, res.message)
+}
+
+// ---- Review & approve ----
+
+const confirmOpen = ref(false)
+const sending = ref(false)
+const approveError = ref<{ title: string; details: string[] } | null>(null)
+
 const steps = computed<Step[]>(() => [
   { label: 'Audience', status: 'done' },
   { label: 'Messages', status: allFinal.value ? 'done' : 'current' },
-  { label: 'Review', status: allFinal.value ? 'current' : 'upcoming' },
-  { label: 'Send', status: 'upcoming' },
+  {
+    label: 'Review',
+    status: confirmOpen.value ? 'done' : allFinal.value ? 'current' : 'upcoming',
+  },
+  { label: 'Send', status: confirmOpen.value ? 'current' : 'upcoming' },
 ])
 
 const canReview = computed(
@@ -108,8 +139,58 @@ const canReview = computed(
     campaign.value !== null &&
     campaign.value.status === 'ready' &&
     allFinal.value &&
+    editing.size === 0 &&
     campaign.value.audience.channel_messages > 0,
 )
+
+/** Why "Review & approve" is not available yet, in words. */
+const reviewHint = computed(() => {
+  const c = campaign.value
+  if (!c || canReview.value) return ''
+  if (!allFinal.value) return 'Available once every message is written and checked.'
+  if (editing.size > 0) return 'Save or cancel your edit first.'
+  if (c.audience.channel_messages === 0) return 'Nobody in this audience can be reached.'
+  return 'Every selected channel needs a valid message.'
+})
+
+function openConfirm() {
+  approveError.value = null
+  confirmOpen.value = true
+}
+
+async function approve() {
+  if (sending.value || !campaign.value) return
+  sending.value = true
+  approveError.value = null
+  try {
+    const res = await approveCampaign(campaign.value.id)
+    confirmOpen.value = false
+    await router.push({ name: 'campaign-live', params: { id: res.campaign_id } })
+  } catch (e) {
+    approveError.value = approvalFailure(e)
+  } finally {
+    sending.value = false
+  }
+}
+
+function approvalFailure(e: unknown) {
+  if (isUnreachable(e)) {
+    return {
+      title: "Can't reach the server",
+      details: [
+        'Nothing changes by trying again: a campaign that was already approved is never sent twice.',
+      ],
+    }
+  }
+  if (e instanceof ApiError) {
+    const report = (e.body as { report?: Report } | null)?.report
+    return {
+      title: e.message.charAt(0).toUpperCase() + e.message.slice(1),
+      details: report ? report.errors.map((x) => x.message) : [],
+    }
+  }
+  return { title: 'Something went wrong', details: [] }
+}
 </script>
 
 <template>
@@ -185,13 +266,36 @@ const canReview = computed(
               :channel="ch"
               :draft="drafts.progress.value.channels[ch]!"
               :longest="campaign.audience.longest_values[ch] ?? {}"
+              :campaign-id="campaign.id"
+              :editable="!isLocked(campaign) && !sending"
+              @editing="onEditing(ch, $event)"
+              @saved="onSaved(ch, $event)"
             />
           </template>
           <div class="actions">
-            <AppButton variant="primary" :disabled="!canReview">Review &amp; approve</AppButton>
+            <p v-if="reviewHint" id="review-hint" class="caption secondary-text">
+              {{ reviewHint }}
+            </p>
+            <AppButton
+              variant="primary"
+              :disabled="!canReview"
+              :aria-describedby="reviewHint ? 'review-hint' : undefined"
+              @click="openConfirm"
+            >
+              Review &amp; approve
+            </AppButton>
           </div>
         </div>
       </div>
+
+      <ConfirmSendModal
+        :open="confirmOpen"
+        :campaign="campaign"
+        :sending="sending"
+        :error="approveError"
+        @close="confirmOpen = false"
+        @confirm="approve"
+      />
     </template>
   </section>
 </template>
@@ -237,7 +341,10 @@ const canReview = computed(
 
 .actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: var(--space-4);
+  flex-wrap: wrap;
 }
 
 @media (width < 1200px) {

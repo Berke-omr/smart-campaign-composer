@@ -2,17 +2,44 @@
 // One channel's message while it is written and checked (02 — Draft):
 // Writing… (text streams in), Validating…, Fixing… · attempt n of 3, Valid,
 // Needs manual edit. The counter shows the worst-case length (D15).
-import { computed, useId } from 'vue'
-import type { Channel, Field, Values } from '@/api/types'
+import { computed, ref, useId } from 'vue'
+import type { Channel, Field, SaveMessageResponse, Values } from '@/api/types'
+import AppButton from '@/components/ui/AppButton.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import CharacterCounter from '@/components/ui/CharacterCounter.vue'
 import SkeletonLines from '@/components/ui/SkeletonLines.vue'
 import { fieldLimit, fieldsOf, worstCaseLength } from '@/logic/content'
 import { isFinal, type ChannelDraft } from '@/logic/draft'
 import { CHANNEL_LABELS, draftStateLabel } from '@/logic/labels'
+import MessageEditor from './MessageEditor.vue'
 import MessageText from './MessageText.vue'
 
-const props = defineProps<{ channel: Channel; draft: ChannelDraft; longest: Values }>()
+const props = withDefaults(
+  defineProps<{
+    channel: Channel
+    draft: ChannelDraft
+    longest: Values
+    campaignId: number
+    /** The campaign is still a draft or ready, so a finished message may be edited. */
+    editable?: boolean
+  }>(),
+  { editable: false },
+)
+const emit = defineEmits<{ editing: [boolean]; saved: [SaveMessageResponse] }>()
+
+const editing = ref(false)
+
+function setEditing(on: boolean) {
+  editing.value = on
+  emit('editing', on)
+}
+
+function onSaved(res: SaveMessageResponse) {
+  setEditing(false)
+  emit('saved', res)
+}
+
+const hasText = computed(() => Object.values(props.draft.fields).some((v) => v))
 
 const titleId = useId()
 const FIELD_LABELS: Record<Field, string> = { text: 'Text', subject: 'Subject', body: 'Body' }
@@ -21,9 +48,11 @@ const fields = computed(() => fieldsOf(props.channel))
 const writing = computed(() => props.draft.state === 'writing')
 
 const stateLabel = computed(() =>
-  props.draft.state === 'pending'
-    ? 'Waiting to start…'
-    : draftStateLabel(props.draft.state, props.draft.attempt, props.draft.maxAttempts),
+  editing.value
+    ? 'Editing · not saved yet'
+    : props.draft.state === 'pending'
+      ? 'Waiting to start…'
+      : draftStateLabel(props.draft.state, props.draft.attempt, props.draft.maxAttempts),
 )
 
 /** The field the text is streaming into: the email subject is complete before the body starts. */
@@ -71,45 +100,61 @@ function errorsOf(field: Field): string[] {
       </span>
     </header>
 
-    <p v-if="draft.state === 'fixing' && draft.problems.length" class="caption secondary-text">
-      Fixing: {{ draft.problems.join('; ') }}
-    </p>
+    <MessageEditor
+      v-if="editing"
+      :campaign-id="campaignId"
+      :channel="channel"
+      :initial="draft.fields"
+      :longest="longest"
+      @saved="onSaved"
+      @cancel="setEditing(false)"
+    />
 
-    <div v-for="field in fields" :key="field" class="field">
-      <span v-if="channel === 'email'" class="field-label label-text">{{
-        FIELD_LABELS[field]
-      }}</span>
-      <div class="field-box">
-        <MessageText
-          v-if="text(field)"
-          :text="text(field)"
-          :channel="channel"
-          :writing="streamingField === field"
-        />
-        <p v-else-if="isFinal(draft.state)" class="secondary-text">No text yet.</p>
-        <SkeletonLines
-          v-if="streamingField === field || (draft.state === 'pending' && !text(field))"
-        />
-        <div v-if="fieldLimit(field) > 0 && text(field)" class="field-footer">
-          <CharacterCounter
-            :length="worstCaseLength(text(field), longest)"
-            :limit="fieldLimit(field)"
+    <template v-else>
+      <p v-if="draft.state === 'fixing' && draft.problems.length" class="caption secondary-text">
+        Fixing: {{ draft.problems.join('; ') }}
+      </p>
+
+      <div v-for="field in fields" :key="field" class="field">
+        <span v-if="channel === 'email'" class="field-label label-text">{{
+          FIELD_LABELS[field]
+        }}</span>
+        <div class="field-box">
+          <MessageText
+            v-if="text(field)"
+            :text="text(field)"
+            :channel="channel"
+            :writing="streamingField === field"
           />
+          <p v-else-if="isFinal(draft.state)" class="secondary-text">No text yet.</p>
+          <SkeletonLines
+            v-if="streamingField === field || (draft.state === 'pending' && !text(field))"
+          />
+          <div v-if="fieldLimit(field) > 0 && text(field)" class="field-footer">
+            <CharacterCounter
+              :length="worstCaseLength(text(field), longest)"
+              :limit="fieldLimit(field)"
+            />
+          </div>
         </div>
+        <ul v-if="errorsOf(field).length" class="field-errors">
+          <li v-for="e in errorsOf(field)" :key="e">{{ e }}</li>
+        </ul>
       </div>
-      <ul v-if="errorsOf(field).length" class="field-errors">
-        <li v-for="e in errorsOf(field)" :key="e">{{ e }}</li>
-      </ul>
-    </div>
 
-    <div v-if="draft.state === 'needs_manual_edit'" class="manual" role="note">
-      <p class="manual-title">This message needs a manual edit</p>
-      <ul v-if="draft.problems.length">
-        <li v-for="p in draft.problems" :key="p">{{ p }}</li>
-      </ul>
-    </div>
+      <div v-if="draft.state === 'needs_manual_edit'" class="manual" role="note">
+        <p class="manual-title">This message needs a manual edit</p>
+        <ul v-if="draft.problems.length">
+          <li v-for="p in draft.problems" :key="p">{{ p }}</li>
+        </ul>
+      </div>
 
-    <slot />
+      <div v-if="editable && isFinal(draft.state)" class="card-actions">
+        <AppButton variant="secondary" @click="setEditing(true)">
+          {{ !hasText ? 'Write message' : draft.state === 'valid' ? 'Edit' : 'Edit message' }}
+        </AppButton>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -233,6 +278,11 @@ function errorsOf(field: Field): string[] {
 .manual-title {
   font-weight: 600;
   color: var(--color-campaign-failed-ink);
+}
+
+.card-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .manual ul {

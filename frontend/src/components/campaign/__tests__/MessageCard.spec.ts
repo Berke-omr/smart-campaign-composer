@@ -24,7 +24,7 @@ function draft(over: Partial<ChannelDraft>): ChannelDraft {
 }
 
 function card(channel: 'sms' | 'email', d: ChannelDraft) {
-  return mount(MessageCard, { props: { channel, draft: d, longest } })
+  return mount(MessageCard, { props: { channel, draft: d, longest, campaignId: 1 } })
 }
 
 describe('MessageCard', () => {
