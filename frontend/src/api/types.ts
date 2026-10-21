@@ -40,6 +40,8 @@ export interface Reach {
 
 export interface Audience extends Reach {
   description: { summary: string; lines: string[] }
+  /** Per selected channel: the values the worst-case length is computed with (D15). */
+  longest_values: Partial<Record<Channel, Values>>
 }
 
 export type Field = 'text' | 'subject' | 'body'

@@ -90,7 +90,7 @@ func fieldsOf(ch Channel, m Message) []field {
 // everyone. The same function checks Claude's drafts and the marketer's
 // edits.
 func Validate(ch Channel, m Message, longest Values) Report {
-	worst := worstValues(longest)
+	worst := WorstCaseValues(longest)
 	r := Report{Errors: Errors{}, LongestValues: worst}
 
 	for _, f := range fieldsOf(ch, m) {
@@ -189,9 +189,11 @@ func emojiIn(s string) []string {
 	return found
 }
 
-// worstValues picks, for each variable, the longer of the audience's longest
-// value and the fallback that an empty value would render as.
-func worstValues(longest Values) Values {
+// WorstCaseValues picks, for each variable, the longer of the audience's
+// longest value and the fallback that an empty value would render as. These
+// are the values a message's worst-case length is computed with; the campaign
+// view publishes them per channel so the UI can count the same way.
+func WorstCaseValues(longest Values) Values {
 	w := make(Values, len(Variables))
 	for _, v := range Variables {
 		w[v] = longest[v]

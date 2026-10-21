@@ -168,7 +168,11 @@ func (s *Service) audience(ctx context.Context, c Campaign) (audienceView, map[c
 	if err != nil {
 		return audienceView{}, nil, err
 	}
-	return audienceView{Reach: a.Reach(c.Channels), Description: segment.Describe(v)}, longest, nil
+	worst := make(map[content.Channel]content.Values, len(c.Channels))
+	for _, ch := range c.Channels {
+		worst[ch] = content.WorstCaseValues(longest[ch])
+	}
+	return audienceView{Reach: a.Reach(c.Channels), Description: segment.Describe(v), LongestValues: worst}, longest, nil
 }
 
 // Emit sends one server-sent event; an error means the client is gone.
@@ -404,6 +408,12 @@ func hasContent(ch content.Channel, m content.Message) bool {
 type audienceView struct {
 	segment.Reach
 	Description segment.Description `json:"description"`
+	// LongestValues are, per selected channel, the values a message's
+	// worst-case length is computed with: the same as the longest_values of
+	// that channel's report, but available before any message exists, so the
+	// draft screen's counter shows the number the validator enforces while a
+	// message streams or is written by hand (DECISIONS.md D15).
+	LongestValues map[content.Channel]content.Values `json:"longest_values"`
 }
 
 // View is a campaign with everything the draft screen shows.

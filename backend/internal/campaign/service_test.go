@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync"
 	"testing"
@@ -222,6 +223,60 @@ func TestRefusedTwiceStoresNoContent(t *testing.T) {
 	}
 	if got.Status != StatusDraft {
 		t.Errorf("status = %s", got.Status)
+	}
+}
+
+// TestViewHasLongestValuesPerChannel: the campaign view carries, for each
+// selected channel, the values the worst case is computed with, also for a
+// channel without a message (the UI's counter needs them before the first
+// report exists). They equal what the validator itself uses.
+func TestViewHasLongestValuesPerChannel(t *testing.T) {
+	f := setup(t, mock.Options{})
+	ctx := context.Background()
+	v, err := f.svc.Create(ctx, f.brief(t, "fault-refusal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Audience.LongestValues) != 2 || v.Audience.LongestValues[content.SMS][content.FirstName] == "" {
+		t.Fatalf("before drafting: longest values = %v", v.Audience.LongestValues)
+	}
+	var rec recorder
+	_ = f.svc.StreamDrafts(ctx, v.ID, rec.emit)
+	got, _ := f.svc.Get(ctx, v.ID)
+
+	// Email has a message: the view's values are its report's values.
+	if want := got.Messages[content.Email].Report.LongestValues; !maps.Equal(got.Audience.LongestValues[content.Email], want) {
+		t.Errorf("email: view %v, report %v", got.Audience.LongestValues[content.Email], want)
+	}
+	// The SMS was declined twice and has none: a rejected edit's report shows what the validator uses.
+	if got.Messages[content.SMS].Message != nil {
+		t.Fatal("expected an SMS without content")
+	}
+	_, _, err = f.svc.EditMessage(ctx, v.ID, content.SMS, content.Message{Text: ""})
+	var ce *ContentError
+	if !errors.As(err, &ce) {
+		t.Fatalf("empty edit: err = %v", err)
+	}
+	if !maps.Equal(got.Audience.LongestValues[content.SMS], ce.Report.LongestValues) {
+		t.Errorf("sms: view %v, validator %v", got.Audience.LongestValues[content.SMS], ce.Report.LongestValues)
+	}
+
+	// When every name is shorter than the fallback, the fallback is the worst case.
+	if _, err := f.pool.Exec(ctx, "UPDATE users SET first_name = 'Ali'"); err != nil {
+		t.Fatal(err)
+	}
+	short, _ := f.svc.Get(ctx, v.ID)
+	if got := short.Audience.LongestValues[content.SMS][content.FirstName]; got != content.Fallbacks[content.FirstName] {
+		t.Errorf("short names: first_name = %q, want the fallback %q", got, content.Fallbacks[content.FirstName])
+	}
+
+	// Only the selected channels are listed.
+	sms, err := f.svc.Create(ctx, f.brief(t, "new-season-sms"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sms.Audience.LongestValues[content.Email]; ok || len(sms.Audience.LongestValues) != 1 {
+		t.Errorf("SMS-only campaign: longest values = %v", sms.Audience.LongestValues)
 	}
 }
 

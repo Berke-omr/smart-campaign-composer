@@ -148,7 +148,11 @@ The [campaign view](#campaign-view).
     "total": 175, "sms_reachable": 98, "email_reachable": 132,
     "sms_excluded": 77, "email_excluded": 43, "channel_messages": 230,
     "description": {"summary": "Users matching all of the following",
-                    "lines": ["City is İstanbul", "Added to cart in the last 30 days", "No purchase in the last 30 days"]}
+                    "lines": ["City is İstanbul", "Added to cart in the last 30 days", "No purchase in the last 30 days"]},
+    "longest_values": {
+      "sms":   {"first_name": "Muhammed Emin", "last_name": "Montgomery-Fitzgerald", "city": "İstanbul"},
+      "email": {"first_name": "Muhammed Emin", "last_name": "Montgomery-Fitzgerald", "city": "İstanbul"}
+    }
   },
   "rule": {"match": "all", "conditions": [{"field": "city", "op": "eq", "value": "İstanbul"}, "..."]},
   "unsupported_criteria": [],
@@ -163,6 +167,10 @@ The [campaign view](#campaign-view).
 
 - `unsupported_criteria`: parts of the brief no field can express (e.g. `["kadın kullanıcılar"]`). Show them as a warning; they were **not** applied.
 - `as_of`: anchor of "in the last N days". Counts and longest values stay the same for the life of the draft.
+- `audience.longest_values`: per selected channel, the values the [report](#report)'s worst case is computed with (the
+  longest among the people that channel reaches, or a variable's fallback when that is longer). They equal the
+  `longest_values` of that channel's report, but are there before any message exists, so the UI counts a streaming or
+  hand-written message exactly like the validator (added in P6).
 - `messages.<channel>`: `null` until drafted, then a [message view](#message-view).
 - `approved_at`: when sending started (the dashboard's "Started 14:32:05"); `null` before approval. `finished_at`: when the
   campaign became `completed` or `failed`.
