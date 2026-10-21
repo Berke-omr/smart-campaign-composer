@@ -22,6 +22,7 @@ import (
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/mock"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/logging"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/segment"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/tracking"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/users"
 )
 
@@ -110,6 +111,7 @@ func run() error {
 		Examples:  catalog.Examples(),
 		Campaigns: campaigns,
 		DB:        pool,
+		Tracking:  tracking.NewReader(pool),
 	})
 	srv := &http.Server{
 		Addr:              httpCfg.Addr,

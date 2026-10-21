@@ -29,8 +29,13 @@ type Deps struct {
 	Examples []mock.Example
 	// Campaigns runs the draft flow; nil disables the campaign routes.
 	Campaigns *campaign.Service
-	// Now is the clock used to anchor relative-time rules; nil means time.Now.
+	// Now is the clock used to anchor relative-time rules and to time
+	// dashboard snapshots; nil means time.Now.
 	Now func() time.Time
+	// Tracking feeds the live dashboard stream; nil leaves the route out.
+	Tracking Snapshotter
+	// SnapshotEvery is the dashboard stream's interval; 0 means one second.
+	SnapshotEvery time.Duration
 	// DB is pinged by /readyz; nil leaves the route out.
 	DB Pinger
 }
@@ -63,6 +68,9 @@ type AudienceCounter interface {
 func NewRouter(d Deps) http.Handler {
 	if d.Now == nil {
 		d.Now = time.Now
+	}
+	if d.SnapshotEvery <= 0 {
+		d.SnapshotEvery = time.Second
 	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -118,6 +126,9 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/campaigns/{id}/draft/stream", d.streamDrafts)
 			r.Put("/campaigns/{id}/messages/{channel}", d.editMessage)
 			r.Post("/campaigns/{id}/approve", d.approveCampaign)
+		}
+		if d.Tracking != nil {
+			r.Get("/campaigns/{id}/events", d.streamEvents)
 		}
 	})
 
