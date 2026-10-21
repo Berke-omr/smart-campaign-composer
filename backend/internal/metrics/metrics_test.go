@@ -198,9 +198,10 @@ func TestWorkerCountersMatchTheAttemptLog(t *testing.T) {
 		}
 	}
 
-	// Deliveries: the gauge and the table, every combination.
+	// Deliveries: the gauge and the table, every combination. The statuses
+	// are listed here, not taken from the code under test.
 	for _, ch := range []string{"sms", "email"} {
-		for _, status := range deliveryStatuses {
+		for _, status := range []string{"queued", "sending", "retrying", "sent", "failed"} {
 			var n float64
 			if err := pool.QueryRow(ctx, `SELECT count(*) FROM deliveries WHERE channel = $1 AND status = $2`, ch, status).Scan(&n); err != nil {
 				t.Fatal(err)
