@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/llm/mock"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/logging"
+	"github.com/Berke-omr/smart-campaign-composer/backend/internal/testdb"
 	"github.com/Berke-omr/smart-campaign-composer/backend/internal/users"
 )
 
@@ -39,6 +43,59 @@ func TestHealthz(t *testing.T) {
 	}
 	if body := rec.Body.String(); body != "{\"status\":\"ok\"}\n" {
 		t.Errorf("body = %q", body)
+	}
+}
+
+type fakePinger struct{ err error }
+
+func (f fakePinger) Ping(context.Context) error { return f.err }
+
+func TestReadyz(t *testing.T) {
+	rec := serve(t, Deps{DB: fakePinger{}}, http.MethodGet, "/readyz")
+	if rec.Code != http.StatusOK || rec.Body.String() != "{\"status\":\"ok\"}\n" {
+		t.Fatalf("database answers: status %d body %q, want 200 ok", rec.Code, rec.Body)
+	}
+
+	rec = serve(t, Deps{DB: fakePinger{err: errors.New("dial tcp 10.0.0.5:5432: connect: connection refused")}},
+		http.MethodGet, "/readyz")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("database down: status %d, want 503", rec.Code)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"status":"unavailable"`) || strings.Contains(body, "10.0.0.5") {
+		t.Errorf("database down: body %q, want status unavailable without the error's details", body)
+	}
+}
+
+// TestReadyzWithAStoppedDatabase uses a real pool whose server is gone: the
+// pool connects lazily, so only the readiness ping notices.
+func TestReadyzWithAStoppedDatabase(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close() // nothing listens there any more
+	pool, err := pgxpool.New(context.Background(), "postgres://scc:scc@"+addr+"/scc?sslmode=disable&connect_timeout=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	rec := serve(t, Deps{DB: pool}, http.MethodGet, "/readyz")
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body %q", rec.Code, rec.Body)
+	}
+	// Liveness does not depend on the database.
+	if rec := serve(t, Deps{DB: pool}, http.MethodGet, "/healthz"); rec.Code != http.StatusOK {
+		t.Errorf("healthz = %d with the database down, want 200", rec.Code)
+	}
+}
+
+func TestReadyzWithTheDatabase(t *testing.T) {
+	pool := testdb.New(t)
+	rec := serve(t, Deps{DB: pool}, http.MethodGet, "/readyz")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %q", rec.Code, rec.Body)
 	}
 }
 

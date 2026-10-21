@@ -109,6 +109,7 @@ func run() error {
 		LLM:       llmInfo,
 		Examples:  catalog.Examples(),
 		Campaigns: campaigns,
+		DB:        pool,
 	})
 	srv := &http.Server{
 		Addr:              httpCfg.Addr,

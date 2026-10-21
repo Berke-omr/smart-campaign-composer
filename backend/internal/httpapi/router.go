@@ -31,7 +31,18 @@ type Deps struct {
 	Campaigns *campaign.Service
 	// Now is the clock used to anchor relative-time rules; nil means time.Now.
 	Now func() time.Time
+	// DB is pinged by /readyz; nil leaves the route out.
+	DB Pinger
 }
+
+// Pinger checks that the database answers. *pgxpool.Pool implements it.
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
+
+// readyTimeout bounds the readiness ping, so a database that hangs makes
+// /readyz fail instead of hang.
+const readyTimeout = 2 * time.Second
 
 // LLMInfo tells the UI which LLM is active, so it can show a demo badge when
 // the mock answers (DECISIONS.md D12).
@@ -59,10 +70,24 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(middleware.Recoverer)
 
 	// Liveness: answers as long as the process can serve HTTP. It deliberately
-	// does not touch the database (that is what /readyz is for, added in P5).
+	// does not touch the database (that is what /readyz is for).
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	// Readiness: the api can do its work only while the database answers.
+	if d.DB != nil {
+		r.Get("/readyz", func(w http.ResponseWriter, req *http.Request) {
+			ctx, cancel := context.WithTimeout(req.Context(), readyTimeout)
+			defer cancel()
+			if err := d.DB.Ping(ctx); err != nil {
+				d.Logger.Warn("not ready: database does not answer", "err", err)
+				httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{
+					"status": "unavailable", "error": "database unreachable"})
+				return
+			}
+			httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		})
+	}
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/stats/users", func(w http.ResponseWriter, req *http.Request) {
