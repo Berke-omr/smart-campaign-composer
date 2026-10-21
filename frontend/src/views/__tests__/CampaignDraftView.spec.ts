@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import type { CampaignView, MessageView } from '@/api/types'
+import ConfirmSendModal from '@/components/campaign/ConfirmSendModal.vue'
 import { routes } from '@/router'
 import CampaignDraftView from '../CampaignDraftView.vue'
 
@@ -152,6 +153,18 @@ describe('CampaignDraftView', () => {
     approve()
     await flushPromises()
     expect(router.currentRoute.value.fullPath).toBe('/campaigns/3/live')
+  })
+
+  it('approves once even if the dialog confirms twice before the button updates', async () => {
+    const { wrapper } = await setup()
+    await button(wrapper, 'Review & approve').trigger('click')
+    const modal = wrapper.findComponent(ConfirmSendModal)
+    modal.vm.$emit('confirm')
+    modal.vm.$emit('confirm')
+    await flushPromises()
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
+    approve()
+    await flushPromises()
   })
 
   it('keeps an approval error in the dialog', async () => {
