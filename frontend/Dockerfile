@@ -9,7 +9,8 @@ RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 
 FROM deps AS test
 COPY . .
-CMD ["npx", "vitest", "--run"]
+# Type-check first (app, tests and config), so a type error fails `make test` too.
+CMD ["sh", "-c", "npx vue-tsc --build && npx vitest --run"]
 
 FROM deps AS build
 COPY . .
