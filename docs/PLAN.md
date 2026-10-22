@@ -21,7 +21,7 @@
 | P3 | LLM layer | ✅ done (PR, branch `feat/p3-llm`) | 2026-10-19 |
 | P4 | Approval & delivery pipeline | ✅ done (PR, branch `feat/p4-delivery`) | 2026-10-20 |
 | P5 | Tracking (SSE, metrics, health) | ✅ done (PR, branch `feat/p5-tracking`) | 2026-10-21 |
-| P6 | Frontend | ✅ done, in review (branch `feat/p6-frontend`) | 2026-10-21 |
+| P6 | Frontend | ✅ done (PR, branch `feat/p6-frontend`) | 2026-10-21 |
 | P7 | Hardening & submission | ⏳ next | — |
 | P8 | Bonus (optional) | ⬜ | — |
 
