@@ -301,6 +301,15 @@
   - Selection: tests pick a scenario by id; key-less runs match the typed brief to a scenario, and an
     unmatched brief falls back to a generic keyword-based response so a reviewer can still try their
     own brief without a key.
+  - *Limits of the keyword fallback (found while writing `docs/TEST-SCENARIOS.md`, kept as they
+    are):* it reads only cities, "sepet"/"cart", a few "did not buy" phrases and the first "N gün";
+    it never fills `unsupported_criteria`, so a brief with only unsupported criteria (gender, age,
+    email opens) targets **all users without a warning**; a negation it does not know is read as the
+    positive ("sepetine ürün eklememiş" → added to cart in the last 30 days); a city written without
+    Turkish letters ("Eskisehir") is missed, and a brief with no Turkish letters gets English copy;
+    the tone is ignored. Each test-plan brief therefore has its own catalog scenario
+    (`10-…` to `21-…`, not in the brief library). With Claude these briefs go through the prompt's
+    `unsupported_criteria` rule (D9).
   - Streams with artificial delay so the UI behaves like the real thing.
   - **Example-brief library** (`GET /api/briefs/examples`, D22): the happy-path scenarios' briefs
     are exposed as ready-made examples, so a reviewer without a key can run a deterministic
@@ -640,4 +649,5 @@ GSM-7/UCS-2 segment billing · horizontal scaling of the worker (shared rate lim
 a Prometheus server or dashboards (the `/metrics` endpoints are ready to scrape) ·
 field-to-field segment conditions · re-checking consent between approval and send (the audience is
 frozen at approval) · pausing or cancelling a campaign that is sending · a mock provider that
-remembers keys across restarts.
+remembers keys across restarts · a smarter keyword fallback in the mock LLM (briefs outside the
+catalog get a rough reading without unsupported-criteria warnings, D12).
