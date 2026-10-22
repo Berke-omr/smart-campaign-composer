@@ -1,0 +1,12 @@
+{
+  "id": "same-day-delivery-ascii",
+  "brief": "Ankara ve Eskisehir'deki musterilerimize ayni gun teslimat basladi, SMS ile haber ver.",
+  "channels": ["sms"],
+  "tone": "friendly",
+  "segment": [
+    {"answer": {"campaign_name": "Same-day delivery", "rule": {"match": "all", "conditions": [
+      {"field": "city", "op": "in", "value": ["Ankara", "Eskişehir"]}]}, "unsupported_criteria": []}}
+  ],
+  "sms": [{"answer": {"text": "Müjde {{first_name}}! {{city}} için aynı gün teslimat başladı. Siparişin artık aynı gün kapında."}}],
+  "expect": {"segment": "valid@1", "sms": "valid@1"}
+}

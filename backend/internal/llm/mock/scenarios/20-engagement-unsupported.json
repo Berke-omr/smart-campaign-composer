@@ -1,0 +1,13 @@
+{
+  "id": "engagement-unsupported",
+  "brief": "Son 6 aydır maillerimizi açmayan ve uygulamaya giriş yapmayan kullanıcılara geri dönüş maili at.",
+  "channels": ["email"],
+  "tone": "friendly",
+  "segment": [
+    {"answer": {"campaign_name": "Re-engagement", "rule": {"match": "all", "conditions": []}, "unsupported_criteria": ["son 6 aydır mail açmayanlar", "son 6 aydır uygulamaya giriş yapmayanlar"]}}
+  ],
+  "email": [
+    {"answer": {"subject": "{{first_name}}, seni yeniden görmek isteriz", "body": "Merhaba {{first_name}},\n\nBir süredir haberleşemedik.\n\nSen yokken pek çok yenilik oldu; uygulamaya uğrayıp göz atmanı çok isteriz.\n\nGörüşmek üzere,\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "email": "valid@1"}
+}

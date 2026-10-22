@@ -1,0 +1,14 @@
+{
+  "id": "english-speakers",
+  "brief": "İngilizce konuşan müşterilerimize İngilizce bir mail ile yeni koleksiyonu tanıt.",
+  "channels": ["email"],
+  "tone": "professional",
+  "segment": [
+    {"answer": {"campaign_name": "New collection — English", "rule": {"match": "all", "conditions": [
+      {"field": "language", "op": "eq", "value": "en"}]}, "unsupported_criteria": []}}
+  ],
+  "email": [
+    {"answer": {"subject": "{{first_name}}, discover our new collection", "body": "Dear {{first_name}} {{last_name}},\n\nOur new collection has arrived.\n\nWe would be delighted if you took a moment to explore it.\n\nKind regards,\nThe Store Team"}}
+  ],
+  "expect": {"segment": "valid@1", "email": "valid@1"}
+}

@@ -1,0 +1,14 @@
+{
+  "id": "zero-audience-20k",
+  "brief": "Toplam harcaması 20.000 TL'yi geçen müşterilere özel davet maili gönder.",
+  "channels": ["email"],
+  "tone": "professional",
+  "segment": [
+    {"answer": {"campaign_name": "Invitation — spend 20k+", "rule": {"match": "all", "conditions": [
+      {"field": "total_spent", "op": "gt", "value": 20000}]}, "unsupported_criteria": []}}
+  ],
+  "email": [
+    {"answer": {"subject": "Sayın {{first_name}}, size özel bir davetimiz var", "body": "Sayın {{first_name}} {{last_name}},\n\nUzun süredir bizimle olduğunuz için sizi özel bir davetle ağırlamak istiyoruz.\n\nAyrıntıları yakında sizinle paylaşacağız.\n\nSaygılarımızla,\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "email": "valid@1"}
+}
