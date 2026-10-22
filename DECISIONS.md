@@ -27,7 +27,7 @@
 | D14 | User data model: profile attributes | Accepted |
 | D15 | Content rules: length, variables, email format | Accepted (no emoji, after P4) |
 | D16 | Testing strategy | Accepted |
-| D17 | Frontend stack | Accepted (UI library to revisit in P6, see D22) |
+| D17 | Frontend stack | Accepted (P6: own components, no UI library, D26) |
 | D18 | Observability endpoints | Accepted (revised in P5: a metrics endpoint per process, D25) |
 | D19 | Migrations and seed run as one-shot compose services | Accepted (P1) |
 | D20 | Integration tests: one fresh database per test | Accepted (P1) |
@@ -36,6 +36,7 @@
 | D23 | LLM layer as built (P3) | Accepted (P3) |
 | D24 | Approval and delivery as built (P4) | Accepted (P4) |
 | D25 | Tracking as built (P5) | Accepted (P5) |
+| D26 | Frontend as built (P6) | Accepted (P6) |
 
 ---
 
@@ -386,8 +387,10 @@
 
 - **Decision:** Vue 3 (Composition API) + Vite + TypeScript, served as a static build by nginx,
   which also proxies `/api` (SSE unbuffered).
-- **Component library:** Naive UI or PrimeVue, decided at the start of P6. To revisit: the
-  design's glass style (D22) may be easier with our own small components than with a themed library.
+- **Component library:** none *(decided in P6, D26 K1)*. The plan left Naive UI or PrimeVue open;
+  the glass style (D22) is a set of tokens plus about fifteen small components, and the two parts that
+  are hard to get right (a modal dialog and a choice of tone) are native elements (`<dialog>`,
+  `<select>`). No state library and no chart library either (D26 K2, K3).
 
 ## D18 — Observability endpoints
 
@@ -565,6 +568,40 @@ Decisions taken at the start of P5 (K1–K6). Evidence: PLAN.md → Verification
 - **Not built:** a Prometheus server or Grafana in the compose file (the endpoints are there to scrape),
   a per-stream metric, and an index for "recent issues" (it reads at most a campaign's attempts through
   the existing `(campaign_id, started_at)` index).
+
+
+## D26 — Frontend as built (P6)
+
+Decisions taken at the start of P6 (K1–K11, approved together) and while building it. Evidence: PLAN.md →
+Verification log → P6. The design stays a visual reference (D22); where it and these decisions differ, the
+difference is named below.
+
+| # | Topic | Decision | Why |
+|---|---|---|---|
+| K1 | UI library | Own small components (`AppButton`, `GlassCard`, `StatusPill`, `AppDialog`, …) on native elements; no UI library (closes D17) | The glass look is tokens and a few shapes; a themed library would have to be overridden piece by piece. Native `<dialog>` gives an inert background, Escape and a top layer. Every line can be explained in the review |
+| K2 | Chart | Own SVG: the 30-value series per channel, fixed axis up to the limit, dashed 100/s line, an accessible text summary. The curve is a monotone cubic (Steffen tangents) | 2 × 30 points need no library. An ordinary spline bulges above a run of 95–100/s and would draw the line over the limit the chart is there to prove; with Steffen tangents every control point stays between its two samples (tested) |
+| K3 | State | Composables (`useDraftStream`, `useDeliveryStream`, `useConfig`) over plain TypeScript in `src/logic/` (reducer, counter, snapshot wording, stream); no Pinia | Screens share only `/api/config`; each screen reloads its campaign by id, so a page reload works the same. The logic is tested without Vue |
+| K4 | Server-sent events | `EventSource` plus our own reconnect: the browser's retry when an open stream ends; after a non-200 answer (the 502 while the api restarts) the browser gives up, so we wait 1, 2, 4, 8, 10 s (±20%), ask the campaign (`GET`) whether to reopen, stop or change screen, and open a new stream. The dashboard also treats 5 s without a snapshot as a lost connection. `es.close()` on `draft.done` / `delivery.done` | `EventSource` hides the status code of a failed open; the follow-up `GET` tells a restart (retry) from a 404 or an unapproved campaign (stop). A `fetch` stream reader would see the code but needs our own SSE parser, and the contract was written for `EventSource` (`retry: 3000`) |
+| K5 | Counter | The backend's parser, renderer and worst-case length ported to `src/logic/content.ts` (code points, invalid variables counted as written); the backend stays the judge on save. **API addition:** the campaign view's `audience.longest_values` per channel (`content.WorstCaseValues`) | The counter must show the number the validator enforces (D15) while a message streams and for a channel the model never wrote (declined twice, timed out), when no report exists yet. A test compares the port with 720 answers recorded from the live api (`scripts/record-worst-case.mjs`) |
+| K6 | Fonts | `@fontsource-variable/inter`, `/urbanist`, `/jetbrains-mono` 5.3.0 (OFL), imported in `main.ts` | Self-hosted, no request to Google Fonts; each subset has a `unicode-range`, so Turkish pages load latin-ext and nothing else (checked with `document.fonts`) |
+| K7 | Tests | Vitest + `@vue/test-utils` + jsdom: logic tests, component tests with a fake `EventSource`, the recorded counter fixture, mutation checks; the end-to-end flow checked in the browser against the live stack. No Playwright | A browser test runner would add a large image and a full stack to `make test`; the API flow is covered by the backend tests and the P7 smoke script |
+| K8 | Message editor | A plain textarea (an input for the one-line subject) with chips that insert a variable at the caret; variables are pills when the message is read and in the confirm dialog; previews for the fictional sample customer and the longest names | The design draws pills inside the editable text. `contenteditable` with atomic pills brings caret, Turkish keyboard, paste and undo problems; the stored template stays one plain string |
+| K9 | Scope of the chrome | The top bar has only "Demo mode" (from `/api/config`); the sidebar has New campaign, Campaigns and Live sends. Search, notifications, settings, profile, Audiences and Templates are not shown (D22). The greeting follows the time of day without a name (A10: no users) | No dead controls |
+| K10 | P1 status page | Removed with its tests; the backend's `/api/stats/users` stays | Replaced by the composer |
+| K11 | `make test` | The frontend test stage runs `vue-tsc --build` before Vitest | A type error in a test file failed only the image build |
+
+- **Contrast (DESIGN.md §8):** measured in the browser by compositing every text color over its glass layers
+  and over the strongest glow. Three pairs were below 4.5:1 and were changed: secondary text directly on the
+  page (3.99:1 → a derived `--color-text-supporting`, 5.48:1), the current step's coral label (3.61:1 → text
+  color next to the coral marker, as the design asks) and the amber banner ink on a bare tint (4.20:1 → tint
+  over glass, 4.92:1). The primary button's gloss ends where its label starts.
+- **"Edit brief"** opens the composer filled from the campaign (`?from=<id>`); generating creates a new
+  campaign, because a campaign's brief cannot be edited through the API. The old draft stays in the list.
+- **Lists:** the list endpoint carries no delivery counts, so a sending campaign's card shows an indeterminate
+  bar, never a percentage; finished ones are 100% done. Cards call the audience size "people": not all of them
+  consented to every channel, so "recipients" would overstate it.
+- **Not built:** dark theme (the design is light only), mobile layouts below 1024 px, a way to pause or cancel
+  a send (A12), browser end-to-end tests in `make test`.
 
 ---
 
