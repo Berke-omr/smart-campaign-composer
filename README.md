@@ -49,6 +49,7 @@ Runs the backend and frontend test suites in containers, against a throwaway Pos
 ```
 backend/    Go module: cmd/{api,worker,mockprovider,migrate,seed}, internal/…, migrations/
 frontend/   Vue 3 + Vite + TypeScript, served by nginx
-docs/       CASE.md (the brief), PLAN.md (phases and progress)
+docs/       CASE.md (the brief), PLAN.md (phases and progress), API.md (contract),
+            TEST-SCENARIOS.md (manual end-to-end scenarios)
 ai-sessions/  Exported Claude Code sessions
 ```

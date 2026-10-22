@@ -165,7 +165,7 @@ IDs are referenced from tests and commits so reviewers can see which requirement
 - **Estimate:** 10–12 h (design-heavy). **Covers:** R3, R5, R8, R13 (UI).
 
 ### P7 — Hardening & submission
-- **Deliverables:** README (setup, architecture diagram, known gaps), final DECISIONS.md, e2e smoke script, secret scan, `ai-sessions/` exports + index.
+- **Deliverables:** README (setup, architecture diagram, known gaps), final DECISIONS.md, e2e smoke script, secret scan, `ai-sessions/` exports + index. Manual end-to-end scenarios (20 briefs, expected audiences and outcomes) are in [`docs/TEST-SCENARIOS.md`](TEST-SCENARIOS.md); the smoke script can reuse them.
 - **Done when:** fresh clone into an empty directory → `docker compose up` and `make test` pass; secret scan is clean; no personal data in exports.
 - **Estimate:** 4 h. **Covers:** R21–R26.
 
