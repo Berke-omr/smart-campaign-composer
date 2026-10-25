@@ -397,6 +397,18 @@ The mock answers above encode what Claude is expected to do. For the briefs wher
 segment call each confirms it (`POST /api/campaigns` in anthropic mode, without opening the draft stream):
 S08, S09, S12, S13, S15, S16. **Status:** not run yet.
 
+**Run through the UI on 2026-10-26** (Claude Sonnet 5.5, `claude-sonnet-5-5`, after a reseed; read back from the
+`campaigns` and `campaign_messages` tables):
+
+| Scenario | Rule from Claude | Unsupported | Messages |
+|---|---|---|---|
+| S01 | city eq İstanbul · cart within 30 · purchase not within 30 (same as the mock) | none | SMS and email valid on attempt 1 |
+| S03 | cart within 60 (same as the mock) | `kadın kullanıcılar (cinsiyet)` (the mock says `kadın kullanıcılar`) | SMS valid on attempt 1 |
+| S17 | purchase within 30 (same as the mock) | none | SMS valid on attempt 1, urgent tone |
+
+No difference in the rules; the only difference is the wording of the unsupported criterion. The six briefs above
+are still unchecked against Claude.
+
 ## Coverage
 
 | Type | Cat. 1 | Cat. 2 | Cat. 3 | Cat. 4 |
