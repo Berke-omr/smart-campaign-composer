@@ -1,8 +1,9 @@
 # Decisions
 
-> **Status: draft (2026-10-19).** Decisions were made during planning (P0) and will be updated as
-> implementation confirms or changes them. Each entry records the options considered, the choice,
-> and the trade-off accepted. Requirement IDs (R1…, U1…) refer to [`docs/PLAN.md`](docs/PLAN.md).
+> **Status: final (2026-10-26).** Decisions were made during planning (P0) and updated as each
+> phase confirmed or changed them; D23–D27 record what was built. Each entry records the options
+> considered, the choice, and the trade-off accepted. Requirement IDs (R1…, U1…) refer to
+> [`docs/PLAN.md`](docs/PLAN.md).
 >
 > Status legend: **Accepted** · **To verify** (accepted, but depends on something checked during
 > implementation) · **Superseded**.
@@ -37,6 +38,7 @@
 | D24 | Approval and delivery as built (P4) | Accepted (P4) |
 | D25 | Tracking as built (P5) | Accepted (P5) |
 | D26 | Frontend as built (P6) | Accepted (P6) |
+| D27 | Hardening and submission (P7) | Accepted (P7) |
 
 ---
 
@@ -612,6 +614,18 @@ difference is named below.
 - **Not built:** dark theme (the design is light only), mobile layouts below 1024 px, a way to pause or cancel
   a send (A12), browser end-to-end tests in `make test`.
 
+## D27 — Hardening and submission (P7)
+
+Decisions taken at the start of P7 (approved together). Evidence: PLAN.md → Verification log → P7.
+
+| # | Topic | Decision | Why |
+|---|---|---|---|
+| H1 | Smoke test | A Go binary, `backend/cmd/smoke` (standard library only), built into the backend image and run as a compose service behind the `smoke` profile. `make smoke` starts the stack with `LLM_PROVIDER=mock` and runs S05, S11, S18, S17 and S03 of TEST-SCENARIOS.md through the HTTP API, following each approved campaign's live stream to `delivery.done`. It exits before any request if `/api/config` does not report the mock | A reviewer needs only Docker, as for `make test`; bash + `jq` would need `jq` on the host. The mock check and the forced `LLM_PROVIDER=mock` keep it from making a paid call when `.env` holds a key. Only numbers that do not move with the clock are pinned (city and order count: S05's 79 / 45 / 49; S11's 0); time-based audiences are checked against each other (deliveries = reachable per channel, sent + failed = total) |
+| H2 | Secret scan | gitleaks v8.21.2 from its Docker image, run once over every commit (`--log-opts=--all`, `--redact`), plus a pattern scan of the tracked files for personal data (home path, user name, e-mail addresses, the developer's and HR contacts' names, local IPs, key prefixes). Not a `make` target | No installation. The history matters because the repository becomes public: a key removed in a later commit would still be readable. The one finding, a delivery's random UUID idempotency key in a test log of session 03, is a false positive and is documented rather than ignored in a config file |
+| H3 | api stop grace period | No change: the api already has `stop_grace_period: 10s` with `HTTP_SHUTDOWN_TIMEOUT: 8s` (added in P5) | Checked on the running stack: `StopTimeout` is 10 for the api and the worker |
+| H4 | Repository visibility | Public at submission, after the history scan is clean and the P7 pull request is merged. The developer changes the setting | Reviewers can open it without being invited by GitHub user name, which the HR email does not give. Nothing in the history is secret (H2) |
+| H5 | CI (bonus B4) | GitHub Actions running `make test`, in its own pull request after P7, limited to one hour; dropped and listed in the README if it is not green by then | The cheapest bonus and the last one in the cut order; kept out of the P7 pull request so submission does not wait for it |
+
 ---
 
 ## Assumptions
@@ -632,17 +646,18 @@ difference is named below.
 | A12 | After approval | Content is locked; no editing (pause/cancel is nice-to-have) |
 | A13 | UI language | Interface text in English (like Insider One's product UI); briefs and generated messages stay in the brief's language (Turkish in the examples) |
 
-## Open questions (deferred — HR not contacted yet)
+## Open questions (closed)
 
-Resolved for now with working assumptions; revisit before submission.
+Both were closed without contacting HR.
 
-1. **Real key or mock during evaluation?** → Assume **both**. The real-key path is treated as the
-   primary demo (prompts, latency, error handling polished as if evaluators use a key); the mock LLM
-   is a scenario catalog (D12) that tests and key-less runs rely on. *Development uses the
+1. **Real key or mock during evaluation?** → **Both** (closed in P7: `docker compose up` without a key
+   runs the mock; with a key it runs Claude, and three test scenarios were checked on the real model).
+   The real-key path is treated as the primary demo (prompts, latency, error handling polished as if
+   evaluators use a key); the mock LLM is a scenario catalog (D12) that tests and key-less runs rely on. *Development uses the
    developer's own `ANTHROPIC_API_KEY` with Sonnet 5.5 (D13), so the reviewer path is the tested path.*
-2. **Repository visibility?** → Private during development; visibility decided before submission.
+2. **Repository visibility?** → Private during development, **public at submission** (D27 H4).
 
-## Out of scope (will be listed in README)
+## Out of scope (listed in the README)
 
 Authentication and multi-tenancy · delivery-receipt webhooks · quiet hours and frequency capping ·
 GSM-7/UCS-2 segment billing · horizontal scaling of the worker (shared rate limiter) ·

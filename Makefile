@@ -3,7 +3,7 @@
 COMPOSE_TEST := docker compose -f docker-compose.test.yml
 
 .DEFAULT_GOAL := help
-.PHONY: help up down clean logs ps test test-backend test-frontend reseed psql
+.PHONY: help up down clean logs ps test test-backend test-frontend smoke reseed psql
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -38,6 +38,12 @@ test-frontend: ## Vitest component tests
 	@$(COMPOSE_TEST) run --rm frontend-test; status=$$?; \
 		$(COMPOSE_TEST) down -v --remove-orphans >/dev/null 2>&1; \
 		exit $$status
+
+# Starts (or recreates) the stack with the mock LLM first, so the run never
+# reaches the Claude API even when .env holds a key. Creates new campaigns.
+smoke: ## End-to-end smoke test through the API (mock LLM; creates campaigns)
+	LLM_PROVIDER=mock docker compose up -d --build --wait
+	LLM_PROVIDER=mock docker compose --profile smoke run --rm --no-deps smoke
 
 reseed: ## Delete all users and campaigns, then seed again
 	docker compose run --rm seed /app/seed -reset

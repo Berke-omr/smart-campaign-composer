@@ -22,7 +22,7 @@
 | P4 | Approval & delivery pipeline | ✅ done (PR, branch `feat/p4-delivery`) | 2026-10-20 |
 | P5 | Tracking (SSE, metrics, health) | ✅ done (PR, branch `feat/p5-tracking`) | 2026-10-21 |
 | P6 | Frontend | ✅ done (PR, branch `feat/p6-frontend`) | 2026-10-21 |
-| P7 | Hardening & submission | ⏳ next | — |
+| P7 | Hardening & submission | ✅ done (PR, branch `feat/p7-hardening`) | 2026-10-26 |
 | P8 | Bonus (optional) | ⬜ | — |
 
 ---
@@ -727,7 +727,8 @@ category, "No text yet.", Review & approve disabled with the reason in words.
 - Fonts: a Turkish page loads Inter and Urbanist latin-ext; `document.fonts.check` is true for "İzmir" in Urbanist
   and "ğşıİüöçâ" in Inter; counters use JetBrains Mono.
 - Reduced motion: the `prefers-reduced-motion: reduce` rule (no animations or transitions) is in the loaded CSS, but
-  the in-app browser cannot emulate the setting (`matchMedia` stays false). To be checked with macOS "Reduce motion".
+  the in-app browser cannot emulate the setting (`matchMedia` stays false). Checked in P7 with macOS "Reduce motion"
+  turned on: see P7.
 
 **Mutation checks.** Same procedure as P5, with a scratch script: clean tree, the replacement applied exactly once,
 the mutant passes `vue-tsc --build` and `vite build` (`go build` and `go vet` for the backend), the whole suite runs
@@ -788,3 +789,51 @@ S2 and after S6 and three times after S4 and S7, every run green.
 - New files beyond the plan: `scripts/record-worst-case.mjs` and its fixture, a Vitest setup file (jsdom's `<dialog>`
   has no `showModal`).
 - Estimate: 18.5 h planned for S1–S9; P6 was finished on 2026-10-21.
+
+### P7
+
+Run on 2026-10-26. Every campaign was created with the mock LLM (`/api/config` read first); no paid call was made.
+
+**Done criteria:**
+
+| Criterion | Evidence | Result |
+|---|---|---|
+| Fresh clone into an empty directory → `docker compose up` without `.env` | `gh repo clone … --branch feat/p7-hardening` into an empty scratch directory (no `.env`), the dev stack stopped first; `docker compose -p scc-clean up -d --build --wait` with `ANTHROPIC_API_KEY` and `LLM_PROVIDER` unset (own project name, so a new empty volume) | every service healthy, migrate and seed exited 0 (19 s with a warm Docker cache); `/api/config` → `{"llm":{"mode":"mock","model":null}}`; seed log `inserted 5000, random_seed 42`; `/api/stats/users` → 5,000 / 3,156 / 3,714; `/healthz`, `/readyz` ok; UI `200` |
+| `make test` passes in the clone | `make test` in the clone | exit 0: 16 Go packages `ok` (`-race`, Postgres), frontend 12 files / 108 tests |
+| e2e smoke passes | `make smoke` in the clone (`COMPOSE_PROJECT_NAME=scc-clean`) and on the dev stack | 40 checks passed, 0 failed, 31 s, both times. On the fresh seed S18 reached 175 / 225 and S03 1,276, the "right after a reseed" numbers of TEST-SCENARIOS.md |
+| Secret scan is clean | gitleaks v8.21.2 (Docker), `git` mode over every commit (`--log-opts=--all`, 84 commits), `--redact` | one finding, a false positive (below); the new session 05 export: no leaks |
+| No personal data in exports | pattern scan of every tracked file (home path, user name, e-mail addresses, the developer's and HR contacts' names, local IPs, `sk-ant-` strings longer than the prefix) | one name left in session 03, masked (below); other matches are the patterns themselves inside earlier grep commands, fake seed names, a test IP (`10.0.0.5`) and the GitHub owner name, which stays |
+
+**Smoke test** (`make smoke`, D27 H1). Before the first run against the stack, the binary was pointed at a static
+server answering `/api/config` with `"mode":"anthropic"`: it printed why and exited 1 without another request. What
+it checks:
+
+| Scenario | Checks |
+|---|---|
+| S05 | audience 79 / 45 / 49 (pinned: city and order count do not depend on the clock); SMS `writing1 validating1 fixing2 validating2 valid2`, email `writing1 validating1 valid1`; approve `200` with 45 + 49 = 94; approving again returns the same campaign and counts |
+| S11 | audience 0; the email is still valid; approve `422` "no one in this audience can be reached on the selected channels"; status stays `ready` |
+| S18 | SMS `… fixing3 validating3 needs_manual_edit3`; approve `409`; edit `200` (source `edited`, status `ready`); deliveries = reachable per channel |
+| S17 | rejected edits `too_long`, `emoji`, `unknown_variable` (`422` with that code); a valid edit `200` |
+| S03 | unsupported `kadın kullanıcılar`; SMS only; deliveries `{sms: reachable, email: 0}` |
+| S05, S18, S03 | the live stream followed to `delivery.done`: status `completed`, `done` = total, sent + failed = total per channel |
+
+**Secret scan findings:**
+- gitleaks `generic-api-key` in `ai-sessions/03-2026-10-19-delivery-p4.md` line 4365 (commit `2d1b086`): a test log
+  from a P4 mutation check printing a claimed delivery, whose `Key` is the delivery's idempotency key, a UUID from
+  `idempotency_key UUID … DEFAULT gen_random_uuid()` (`backend/migrations/0003_create_deliveries.sql`) in a throwaway
+  test database. Not a secret; documented here instead of a `.gitleaksignore` (approved).
+- The pattern scan found the developer's first name, lower-case inside a regex, in session 03's printed copy of the
+  converter's source (the same line is masked in session 04). Masked in the current file; the earlier commit still
+  has it.
+
+**Hardening candidates:**
+- api stop grace period: already `stop_grace_period: 10s` with `HTTP_SHUTDOWN_TIMEOUT: 8s` since P5 (`2632b5e`).
+  `docker inspect -f '{{.Config.StopTimeout}}'` on the running stack: api 10, worker 10 (the frontend keeps the
+  machine's 1 s; nginx has no long work to finish). No change (D27 H3).
+- Reduced motion, with macOS "Reduce motion" turned on, in the in-app browser against the production build:
+  `matchMedia('(prefers-reduced-motion: reduce)').matches` is true, and on the composer, a draft (`/campaigns/10`) and
+  a live dashboard (`/campaigns/11/live`) no element has an animation or transition longer than 10 ms (0 of 155,
+  165 and 233 elements). Not checked while a draft was streaming.
+
+**Not verified:** a clean clone on a machine without cached Docker images (the base images and build layers were
+already present here), and an amd64 host.
