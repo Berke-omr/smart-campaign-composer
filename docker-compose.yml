@@ -145,6 +145,7 @@ services:
     command: ["/app/smoke"]
     environment:
       SMOKE_API_URL: http://api:8080
+      SMOKE_UI_URL: http://frontend
     profiles: ["smoke"]
 
   frontend:
