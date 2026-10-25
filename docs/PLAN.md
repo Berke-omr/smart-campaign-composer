@@ -24,6 +24,7 @@
 | P6 | Frontend | ✅ done (PR, branch `feat/p6-frontend`) | 2026-10-21 |
 | P7 | Hardening & submission | ✅ done (PR, branch `feat/p7-hardening`) | 2026-10-26 |
 | P8 | Bonus (optional) | ✅ B4 CI only (PR, branch `feat/ci`); B1–B3 not built | 2026-10-26 |
+| P9 | Security quick wins (audit R-01, R-08, R-02) | 🔄 in progress (branch `fix/security-quick-wins`) | 2026-10-26 |
 
 ---
 
@@ -177,6 +178,27 @@ IDs are referenced from tests and commits so reviewers can see which requirement
 | LLM eval (`make eval`, needs a key) | 2 h | not a bonus in the case, but strengthens the LLM score |
 | B3 Per-user language content | 3 h | seed already has a `language` field |
 | B2 A/B variants | 4 h | |
+
+### P9 — Security quick wins (after the security audit)
+The audit of 2026-10-26 ([`security-threat-model.md`](security-threat-model.md),
+[`security-risk-register.md`](security-risk-register.md), [`security-release-checklist.md`](security-release-checklist.md))
+found three attack paths that work against a reviewer's machine today. P9 closes them; authentication, approval
+version binding (R-11) and UUID campaign ids stay out of scope.
+- **Decisions (approved):** CSRF defence from browser request metadata (`Sec-Fetch-Site`, `Origin`, `Host`), with
+  `Content-Type: application/json` required only on requests that have a body, so the API contract does not change;
+  the api port stays published, on `127.0.0.1`; the branch starts from `feat/ci` (PR #11 not merged yet).
+- **Step 1 — R-01:** publish the UI and api ports on `127.0.0.1` only; README "Security notes".
+- **Step 2 — R-08:** nginx security headers (CSP with `frame-ancestors 'none'`, `X-Frame-Options`, `nosniff`,
+  `Referrer-Policy`, `Permissions-Policy`, COOP) from one include file, repeated in `location /assets/`;
+  `server_tokens off`; smoke checks the headers.
+- **Step 3 — R-02:** `/api` guard middleware: `Host` allowlist (`HTTP_ALLOWED_HOSTS`, default
+  `localhost,127.0.0.1,::1,api`, fail closed); `Sec-Fetch-Site` must be `same-origin` or `none` when present; on
+  unsafe methods `Origin` must equal `Host` and a body must be JSON (415). nginx forwards `$http_host`. Table tests,
+  smoke negatives, and an attack page on another origin.
+- **Step 4 — docs:** API.md "Request guards", DECISIONS.md, README, audit documents (R-01/R-02/R-08 fixed, checklist
+  A-11…A-16), verification log.
+- **Done when:** `make test` and `make smoke` pass; checklist A-11…A-16 give the expected output; the full flow works
+  in a browser with no CSP violation; the attack page creates no campaign; CI is green.
 
 ---
 
@@ -848,3 +870,9 @@ Only B4 (CI) was built, in its own pull request after P7 (D27 H5). `.github/work
 | `make test` passes on GitHub Actions | run `40244495916` on the CI pull request (commit `68bffe4`) | `success` in 3 min 45 s: 16 Go packages `ok`, frontend 12 files / 108 tests, no `FAIL` in the log |
 
 B1 (scheduled sending), B2 (A/B variants), B3 (per-user language) and the LLM eval suite were cut (cut order, items 1 and 2).
+
+---
+
+### P9
+
+*(filled in as the steps are verified)*
