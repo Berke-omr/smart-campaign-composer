@@ -135,6 +135,16 @@ services:
     healthcheck: *http-healthcheck
     restart: unless-stopped
 
+  # `make smoke`: a few scenarios of docs/TEST-SCENARIOS.md through the API.
+  # Not started by `docker compose up` (profile); refuses to run unless the
+  # api uses the mock LLM.
+  smoke:
+    <<: *backend
+    command: ["/app/smoke"]
+    environment:
+      SMOKE_API_URL: http://api:8080
+    profiles: ["smoke"]
+
   frontend:
     build:
       context: ./frontend
