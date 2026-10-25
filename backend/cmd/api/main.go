@@ -125,7 +125,14 @@ func run() error {
 		Tracking:  tracking.NewReader(pool),
 		Stopping:  stopping,
 		Metrics:   metrics.Handler(reg, logger),
+		// Empty: httpapi.DefaultAllowedHosts.
+		AllowedHosts: httpCfg.AllowedHosts,
 	})
+	allowedHosts := httpCfg.AllowedHosts
+	if len(allowedHosts) == 0 {
+		allowedHosts = httpapi.DefaultAllowedHosts
+	}
+	logger.Info("request guard ready", "allowed_hosts", allowedHosts)
 	srv := &http.Server{
 		Addr:              httpCfg.Addr,
 		Handler:           handler,

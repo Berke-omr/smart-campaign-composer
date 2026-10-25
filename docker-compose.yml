@@ -70,6 +70,8 @@ services:
       # On SIGTERM open streams end at once and other requests get up to 8 s,
       # inside the grace period below.
       HTTP_SHUTDOWN_TIMEOUT: 8s
+      # Host names /api answers under; empty: localhost, 127.0.0.1, ::1 and api.
+      HTTP_ALLOWED_HOSTS: ${HTTP_ALLOWED_HOSTS:-}
       # Empty values fall back to the api's defaults: LLM_PROVIDER=auto (Claude when
       # a key is set, the mock LLM otherwise) and LLM_MODEL=claude-sonnet-5-5.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

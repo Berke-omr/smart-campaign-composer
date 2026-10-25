@@ -5,8 +5,9 @@
 // makes a paid call. Every run creates new campaigns and sends their messages
 // to the mock provider. Only numbers that do not move with the clock are
 // pinned (the default seed: 5,000 users, seed 42); the others are checked
-// against each other. With SMOKE_UI_URL set it also checks the UI's security
-// headers (security.go). Run it with `make smoke`.
+// against each other. It also checks the api's request guard and, with
+// SMOKE_UI_URL set, the UI's security headers (security.go). Run it with
+// `make smoke`.
 package main
 
 import (
@@ -44,11 +45,13 @@ func main() {
 
 	c := &checker{}
 	start := time.Now()
-	if ui := strings.TrimRight(os.Getenv("SMOKE_UI_URL"), "/"); ui != "" {
+	ui := strings.TrimRight(os.Getenv("SMOKE_UI_URL"), "/")
+	if ui != "" {
 		uiHeaders(ctx, ui, c)
 	} else {
 		fmt.Println("SMOKE_UI_URL is not set: UI checks skipped")
 	}
+	guards(ctx, cl.base, ui, c)
 	var sending []watch
 	for _, scenario := range []func(context.Context, *client, *checker) *watch{s05, s11, s18, s17, s03} {
 		if w := scenario(ctx, cl, c); w != nil {
