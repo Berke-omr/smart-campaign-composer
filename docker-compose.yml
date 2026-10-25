@@ -75,8 +75,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-}
       LLM_MODEL: ${LLM_MODEL:-}
+    # Published on localhost only: the api has no authentication (A10), so it
+    # must not be reachable from the network (security audit R-01).
     ports:
-      - "${API_HOST_PORT:-8081}:8080"
+      - "127.0.0.1:${API_HOST_PORT:-8081}:8080"
     healthcheck: *http-healthcheck
     depends_on:
       seed:
@@ -150,8 +152,9 @@ services:
       context: ./frontend
       target: runtime
     image: smart-campaign-composer/frontend:local
+    # Localhost only, like the api it proxies (security audit R-01).
     ports:
-      - "${UI_HOST_PORT:-8080}:80"
+      - "127.0.0.1:${UI_HOST_PORT:-8080}:80"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 5s
