@@ -1,0 +1,14 @@
+{
+  "id": "high-spenders-10k",
+  "brief": "Toplam harcaması 10.000 TL'nin üzerinde olan müşterilerimize özel VIP indirim kodu gönder.",
+  "channels": ["email"],
+  "tone": "professional",
+  "segment": [
+    {"answer": {"campaign_name": "High spenders 10k+", "rule": {"match": "all", "conditions": [
+      {"field": "total_spent", "op": "gt", "value": 10000}]}, "unsupported_criteria": []}}
+  ],
+  "email": [
+    {"answer": {"subject": "Sayın {{first_name}}, size özel VIP indiriminiz", "body": "Sayın {{first_name}} {{last_name}},\n\nEn değerli müşterilerimizden biri olduğunuz için size özel bir VIP indirimi hazırladık.\n\nBir sonraki alışverişinizde bu indirimden yararlanabilirsiniz.\n\nSaygılarımızla,\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "email": "valid@1"}
+}

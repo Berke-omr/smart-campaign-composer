@@ -1,0 +1,15 @@
+{
+  "id": "vip-yearly-spend",
+  "brief": "Son 1 yılda 5.000 TL üzeri harcama yapan ve en az 3 siparişi olan müşterilere VIP teşekkür mesajı gönder.",
+  "channels": ["sms", "email"],
+  "tone": "professional",
+  "segment": [
+    {"answer": {"campaign_name": "VIP thanks — 3+ orders", "rule": {"match": "all", "conditions": [
+      {"field": "order_count", "op": "gte", "value": 3}]}, "unsupported_criteria": ["son 1 yılda 5.000 TL üzeri harcama"]}}
+  ],
+  "sms": [{"answer": {"text": "Sayın {{first_name}} {{last_name}}, değerli müşterimiz olarak gösterdiğiniz ilgi için teşekkür ederiz."}}],
+  "email": [
+    {"answer": {"subject": "Değerli müşterimize teşekkürler", "body": "Sayın {{first_name}} {{last_name}},\n\nBizi tercih ettiğiniz ve alışverişlerinizle bize güvendiğiniz için teşekkür ederiz.\n\nSizin gibi değerli müşterilerimize en iyi hizmeti sunmaya devam edeceğiz.\n\nSaygılarımızla,\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "sms": "valid@1", "email": "valid@1"}
+}

@@ -1,0 +1,16 @@
+{
+  "id": "winback-180-buyers",
+  "brief": "Daha önce en az 1 kez alışveriş yapmış ama son 180 gündür alışveriş yapmayan müşterilere 'seni özledik' mesajı ve %20 kupon gönder.",
+  "channels": ["sms", "email"],
+  "tone": "friendly",
+  "segment": [
+    {"answer": {"campaign_name": "Win-back 180 days", "rule": {"match": "all", "conditions": [
+      {"field": "order_count", "op": "gte", "value": 1},
+      {"field": "last_purchase_at", "op": "not_within_last_days", "value": 180}]}, "unsupported_criteria": []}}
+  ],
+  "sms": [{"answer": {"text": "{{first_name}}, seni özledik! Bir sonraki alışverişinde %20 indirim seni bekliyor, uygulamaya uğramayı unutma."}}],
+  "email": [
+    {"answer": {"subject": "{{first_name}}, seni özledik: %20 indirim seni bekliyor", "body": "Merhaba {{first_name}},\n\nSon alışverişinin üzerinden epey zaman geçti ve seni özledik.\n\nGeri dönüşüne özel %20 indirim seni bekliyor.\n\nGörüşmek üzere,\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "sms": "valid@1", "email": "valid@1"}
+}

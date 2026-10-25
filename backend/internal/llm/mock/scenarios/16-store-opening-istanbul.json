@@ -1,0 +1,15 @@
+{
+  "id": "store-opening-istanbul",
+  "brief": "İstanbul Avrupa yakasındaki müşterilerimize Beylikdüzü'nde açılan yeni mağazamızı duyur, açılış haftasına özel %10 indirim.",
+  "channels": ["sms", "email"],
+  "tone": "friendly",
+  "segment": [
+    {"answer": {"campaign_name": "Store opening — İstanbul", "rule": {"match": "all", "conditions": [
+      {"field": "city", "op": "eq", "value": "İstanbul"}]}, "unsupported_criteria": ["Avrupa yakası"]}}
+  ],
+  "sms": [{"answer": {"text": "Merhaba {{first_name}}, Beylikdüzü'ndeki yeni mağazamız açıldı! Açılış haftasına özel %10 indirimle seni bekliyoruz."}}],
+  "email": [
+    {"answer": {"subject": "{{first_name}}, Beylikdüzü'ndeki yeni mağazamız açıldı", "body": "Merhaba {{first_name}},\n\nBeylikdüzü'ndeki yeni mağazamızın kapılarını açtık.\n\nAçılış haftasına özel %10 indirimle seni aramızda görmek isteriz.\n\nGörüşmek üzere,\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "sms": "valid@1", "email": "valid@1"}
+}

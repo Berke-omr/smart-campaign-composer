@@ -1,0 +1,16 @@
+{
+  "id": "never-ordered-dormant",
+  "brief": "Üye olup hiç sipariş vermemiş ve son 6 aydır sepetine ürün eklememiş kullanıcılara ilk siparişe %15 indirim gönder.",
+  "channels": ["sms", "email"],
+  "tone": "friendly",
+  "segment": [
+    {"answer": {"campaign_name": "First order nudge", "rule": {"match": "all", "conditions": [
+      {"field": "order_count", "op": "eq", "value": 0},
+      {"field": "last_cart_add_at", "op": "not_within_last_days", "value": 180}]}, "unsupported_criteria": []}}
+  ],
+  "sms": [{"answer": {"text": "Merhaba {{first_name}}, ilk siparişine özel %15 indirim seni bekliyor! Hemen göz at."}}],
+  "email": [
+    {"answer": {"subject": "{{first_name}}, ilk siparişine %15 indirim", "body": "Merhaba {{first_name}},\n\nAramızda olduğun hâlde henüz ilk siparişini vermedin.\n\nİlk siparişine özel %15 indirim seni bekliyor.\n\nKeyifli alışverişler,\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "sms": "valid@1", "email": "valid@1"}
+}

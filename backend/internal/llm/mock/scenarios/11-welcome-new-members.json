@@ -1,0 +1,16 @@
+{
+  "id": "welcome-new-members",
+  "brief": "Son 30 günde üye olup henüz hiç sipariş vermemiş yeni üyelerimize ilk siparişe özel %15 hoş geldin kuponu gönder.",
+  "channels": ["sms", "email"],
+  "tone": "friendly",
+  "segment": [
+    {"answer": {"campaign_name": "Welcome — new members", "rule": {"match": "all", "conditions": [
+      {"field": "created_at", "op": "within_last_days", "value": 30},
+      {"field": "order_count", "op": "eq", "value": 0}]}, "unsupported_criteria": []}}
+  ],
+  "sms": [{"answer": {"text": "Hoş geldin {{first_name}}! İlk siparişine özel %15 indirim seni bekliyor."}}],
+  "email": [
+    {"answer": {"subject": "Hoş geldin {{first_name}}, ilk siparişine %15 indirim", "body": "Merhaba {{first_name}},\n\nAramıza katıldığın için çok mutluyuz.\n\nİlk siparişine özel %15 indirim seni bekliyor.\n\nKeyifli alışverişler,\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "sms": "valid@1", "email": "valid@1"}
+}

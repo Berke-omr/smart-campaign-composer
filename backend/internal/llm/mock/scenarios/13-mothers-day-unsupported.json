@@ -1,0 +1,14 @@
+{
+  "id": "mothers-day-unsupported",
+  "brief": "35 yaş üstü kadın müşterilerimize Anneler Günü'ne özel %20 indirim gönder.",
+  "channels": ["sms", "email"],
+  "tone": "friendly",
+  "segment": [
+    {"answer": {"campaign_name": "Mother's Day sale", "rule": {"match": "all", "conditions": []}, "unsupported_criteria": ["35 yaş üstü", "kadın müşteriler"]}}
+  ],
+  "sms": [{"answer": {"text": "Merhaba {{first_name}}, Anneler Günü'ne özel %20 indirim seni bekliyor! Fırsatı kaçırma."}}],
+  "email": [
+    {"answer": {"subject": "Anneler Günü'ne özel %20 indirim", "body": "Merhaba {{first_name}},\n\nAnneler Günü yaklaşıyor.\n\nBu özel güne özel %20 indirim seni bekliyor.\n\nSevgiyle,\nMağaza Ekibi"}}
+  ],
+  "expect": {"segment": "valid@1", "sms": "valid@1", "email": "valid@1"}
+}

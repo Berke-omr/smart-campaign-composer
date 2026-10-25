@@ -1,0 +1,12 @@
+{
+  "id": "flash-sale-today",
+  "brief": "Sadece bugün geçerli %30 flash sale! Son 30 günde alışveriş yapan müşterilere SMS ile duyur, acil bir dil olsun.",
+  "channels": ["sms"],
+  "tone": "urgent",
+  "segment": [
+    {"answer": {"campaign_name": "Flash sale — recent buyers", "rule": {"match": "all", "conditions": [
+      {"field": "last_purchase_at", "op": "within_last_days", "value": 30}]}, "unsupported_criteria": []}}
+  ],
+  "sms": [{"answer": {"text": "{{first_name}}, sadece bugün tüm ürünlerde %30 indirim! Fırsat gece yarısı bitiyor, acele et."}}],
+  "expect": {"segment": "valid@1", "sms": "valid@1"}
+}

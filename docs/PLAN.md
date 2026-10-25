@@ -21,7 +21,7 @@
 | P3 | LLM layer | ✅ done (PR, branch `feat/p3-llm`) | 2026-10-19 |
 | P4 | Approval & delivery pipeline | ✅ done (PR, branch `feat/p4-delivery`) | 2026-10-20 |
 | P5 | Tracking (SSE, metrics, health) | ✅ done (PR, branch `feat/p5-tracking`) | 2026-10-21 |
-| P6 | Frontend | ✅ done, in review (branch `feat/p6-frontend`) | 2026-10-21 |
+| P6 | Frontend | ✅ done (PR, branch `feat/p6-frontend`) | 2026-10-21 |
 | P7 | Hardening & submission | ⏳ next | — |
 | P8 | Bonus (optional) | ⬜ | — |
 
@@ -165,7 +165,7 @@ IDs are referenced from tests and commits so reviewers can see which requirement
 - **Estimate:** 10–12 h (design-heavy). **Covers:** R3, R5, R8, R13 (UI).
 
 ### P7 — Hardening & submission
-- **Deliverables:** README (setup, architecture diagram, known gaps), final DECISIONS.md, e2e smoke script, secret scan, `ai-sessions/` exports + index.
+- **Deliverables:** README (setup, architecture diagram, known gaps), final DECISIONS.md, e2e smoke script, secret scan, `ai-sessions/` exports + index. Manual end-to-end scenarios (20 briefs, expected audiences and outcomes) are in [`docs/TEST-SCENARIOS.md`](TEST-SCENARIOS.md); the smoke script can reuse them.
 - **Done when:** fresh clone into an empty directory → `docker compose up` and `make test` pass; secret scan is clean; no personal data in exports.
 - **Estimate:** 4 h. **Covers:** R21–R26.
 
