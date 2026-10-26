@@ -24,7 +24,7 @@
 | P6 | Frontend | ✅ done (PR, branch `feat/p6-frontend`) | 2026-10-21 |
 | P7 | Hardening & submission | ✅ done (PR, branch `feat/p7-hardening`) | 2026-10-26 |
 | P8 | Bonus (optional) | ✅ B4 CI only (PR, branch `feat/ci`); B1–B3 not built | 2026-10-26 |
-| P9 | Security quick wins (audit R-01, R-08, R-02) | 🔄 in progress (branch `fix/security-quick-wins`) | 2026-10-26 |
+| P9 | Security quick wins (audit R-01, R-08, R-02) | ✅ done (PR, branch `fix/security-quick-wins`) | 2026-10-26 |
 
 ---
 
@@ -875,4 +875,26 @@ B1 (scheduled sending), B2 (A/B variants), B3 (per-user language) and the LLM ev
 
 ### P9
 
-*(filled in as the steps are verified)*
+Run on 2026-10-26 on the local stack in mock mode (`/api/config` read before every browser or API check); no paid
+call was made. The full before/after table is in [`security-risk-register.md`](security-risk-register.md) §5.
+
+**Done criteria:**
+
+| Criterion | Evidence | Result |
+|---|---|---|
+| `make test` passes | `make test` after commit `3cfbb5e` | exit 0: 16 Go packages `ok` (`-race`, Postgres), frontend 12 test files |
+| `make smoke` passes | `make smoke` | 52 checks passed, 0 failed (31–32 s): the five scenarios, 6 UI-header checks, 6 request-guard checks (2 through nginx) |
+| Checklist A-11…A-16 | the commands of [`security-release-checklist.md`](security-release-checklist.md), run verbatim | no `0.0.0.0`/`[::]` binding; `415`; `403`; `403`; 4 headers on `/` and on an asset; `Server: nginx` |
+| Not reachable from the network | `curl` to the machine's LAN address, `:8080` and `:8081` | before: `200` / `200`; after: connection refused |
+| Full flow in a browser, no CSP violation | built-in browser: brief library → generate → draft stream → edit SMS (PUT) → approve → live dashboard, with a `securitypolicyviolation` listener | every request `200`; 0 violations; no console error; campaign completed (2,118 messages) |
+| Framing blocked | page on `http://127.0.0.1:8765` with `<iframe src="http://localhost:8080/?nocache=…">` | blank; `frame-ancestors 'none'` violation; `ERR_BLOCKED_BY_RESPONSE` |
+| Attack page creates nothing | page on `http://127.0.0.1:8765`: `text/plain` create, bodiless approve of campaigns 1 and 26, `EventSource` + `<img>` on a draft stream, `text/plain` form POST | all `403`; campaigns 27 → 27, deliveries 7,299 → 7,299, campaigns 1 and 26 still `ready`; rejections logged with reasons |
+| Guard tests catch regressions | four hand-made mutations of `guard.go` (accept cross-site, skip Host, skip JSON body, skip Origin) | each one fails `go test -run Guard` |
+| CI green | — | pending: needs the pull request |
+
+**Found while verifying:** the first framing test still showed the app. The browser had reused a heuristically cached
+`index.html` (served without `Cache-Control`) with its old headers; a cache-busting URL was blocked. `location /` now
+sends `Cache-Control: no-cache` (D28 S6).
+
+**Not done here (on purpose):** PR #11 (CI) could not be merged from this session (the merge needs the developer), so
+this branch starts from `feat/ci`; its pull request shows the CI commits until #11 is merged.

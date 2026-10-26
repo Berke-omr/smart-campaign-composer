@@ -4,7 +4,8 @@ Go/no-go gate derived from the reference catalogue's §9 and from the findings i
 [`security-risk-register.md`](security-risk-register.md). Architecture and scope are in
 [`security-threat-model.md`](security-threat-model.md).
 
-**Status column** records the audit of 2026-10-26 (branch `feat/ci`, commit `68bffe4`):
+**Status column** records the audit of 2026-10-26 (branch `feat/ci`, commit `68bffe4`), updated after P9
+(branch `fix/security-quick-wins`, commit `3cfbb5e`; evidence in the risk register, §5):
 ✅ pass · ❌ fail (open finding) · ⚠️ not re-checked in this audit, re-run before release · N/A.
 
 There are two gates:
@@ -33,21 +34,21 @@ If a **Required** item fails, the release does not go out, or the affected capab
 | # | Check | Level | How to verify | Expected | Status |
 |---|---|---|---|---|---|
 | A-06 | Without a key the api uses the mock LLM | Required | Start without `.env`, then `curl -s http://127.0.0.1:8080/api/config` | `{"llm":{"mode":"mock","model":null}}` | ✅ (P7 clean-clone run, `docs/PLAN.md`) |
-| A-07 | Unit, integration and component tests pass | Required | `make test` | exit 0 | ✅ CI on `feat/ci`, 2026-10-25 23:22 UTC; ⚠️ not re-run locally for this audit |
-| A-08 | End-to-end smoke passes on the mock only | Required | `make smoke` | `40 checks passed, 0 failed`; refuses to run if `/api/config` is not mock | ⚠️ last run in P7 |
+| A-07 | Unit, integration and component tests pass | Required | `make test` | exit 0 | ✅ CI on `feat/ci`, 2026-10-25 23:22 UTC; ✅ local run after P9: 16 Go packages `ok`, frontend 12 files |
+| A-08 | End-to-end smoke passes on the mock only | Required | `make smoke` | `52 checks passed, 0 failed` (40 before P9); refuses to run if `/api/config` is not mock | ✅ after P9 |
 | A-09 | DSL injection tests are part of the suite | Required | `go test ./internal/segment -run 'Injection\|SQLShape'` inside `make test` | pass | ✅ (`segment/validate_test.go:114`, `compile_test.go:150`) |
-| A-10 | README states the security limits (no authentication, run on a trusted machine only, every brief is a paid call with a key) | Required | Read `README.md` → Known gaps | Present | ⚠️ partial: authentication is listed as out of scope (`README.md:118-120`) and paid calls are mentioned (`:32-34`); there is no warning that the UI/API are reachable from the network or that other browser tabs can drive the API |
+| A-10 | README states the security limits (no authentication, run on a trusted machine only, every brief is a paid call with a key) | Required | Read `README.md` → Known gaps | Present | ✅ after P9: README → Security notes (no login, loopback ports, request guard, `HTTP_ALLOWED_HOSTS`, paid calls, links to the audit) |
 
 ### A.3 Exposure of the running stack (low-effort fixes, high value)
 
 | # | Check | Level | How to verify | Expected | Status |
 |---|---|---|---|---|---|
-| A-11 | Published ports are loopback only (R-01) | Recommended | `docker compose ps --format '{{.Service}} {{.Ports}}' \| grep -E '0\.0\.0\.0\|\[::\]'` | no output | ❌ `api` and `frontend` bound to `0.0.0.0`/`[::]` |
-| A-12 | Cross-site writes are rejected (R-02) | Recommended | `curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: text/plain' --data '{"match":"all","conditions":[]}' http://127.0.0.1:8080/api/segments/preview` | `415` | ❌ `200` |
-| A-13 | Foreign `Origin` on unsafe methods is rejected (R-02) | Recommended | same request with `-H 'Content-Type: application/json' -H 'Origin: http://attacker.example'` | `403` | ❌ `200` |
-| A-14 | Foreign `Host` is rejected — DNS rebinding (R-02) | Recommended | `curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: attacker.example' http://127.0.0.1:8080/api/config` | `403` or `421` | ❌ `200` |
-| A-15 | Security headers present on `/` and `/assets/*` (R-08) | Recommended | `curl -sI http://127.0.0.1:8080/ \| grep -ciE '^(content-security-policy\|x-frame-options\|x-content-type-options\|referrer-policy):'` (repeat for one file under `/assets/`) | `4` for both | ❌ `0` |
-| A-16 | nginx version not disclosed (R-08) | Recommended | `curl -sI http://127.0.0.1:8080/ \| grep -i '^server:'` | `Server: nginx` | ❌ `nginx/1.30.6` |
+| A-11 | Published ports are loopback only (R-01) | Recommended | `docker compose ps --format '{{.Service}} {{.Ports}}' \| grep -E '0\.0\.0\.0\|\[::\]'` | no output | ✅ after P9 (audit: ❌ `api` and `frontend` bound to `0.0.0.0`/`[::]`) |
+| A-12 | Cross-site writes are rejected (R-02) | Recommended | `curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: text/plain' --data '{"match":"all","conditions":[]}' http://127.0.0.1:8080/api/segments/preview` | `415` | ✅ after P9 (audit: ❌ `200`) |
+| A-13 | Foreign `Origin` on unsafe methods is rejected (R-02) | Recommended | same request with `-H 'Content-Type: application/json' -H 'Origin: http://attacker.example'` | `403` | ✅ after P9 (audit: ❌ `200`) |
+| A-14 | Foreign `Host` is rejected — DNS rebinding (R-02) | Recommended | `curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: attacker.example' http://127.0.0.1:8080/api/config` | `403` or `421` | ✅ `403` after P9 (audit: ❌ `200`) |
+| A-15 | Security headers present on `/` and `/assets/*` (R-08) | Recommended | `curl -sI http://127.0.0.1:8080/ \| grep -ciE '^(content-security-policy\|x-frame-options\|x-content-type-options\|referrer-policy):'` (repeat for one file under `/assets/`) | `4` for both | ✅ after P9 (audit: ❌ `0`) |
+| A-16 | nginx version not disclosed (R-08) | Recommended | `curl -sI http://127.0.0.1:8080/ \| grep -i '^server:'` | `Server: nginx` | ✅ after P9 (audit: ❌ `nginx/1.30.6`) |
 
 ### A.4 Repository and key hygiene at submission
 
@@ -58,11 +59,10 @@ If a **Required** item fails, the release does not go out, or the affected capab
 | A-19 | Development key rotated after the submission and after any screen-shared demo (R-13) | Required (after submission) | Anthropic console: old key revoked; a request with it returns 401 | revoked | ⏳ pending, after submission |
 | A-20 | Stack stopped and volumes removed on shared machines after the review | Recommended | `make clean` | no `smart-campaign-composer` containers or volumes | ⏳ after the review |
 
-**Gate A verdict on 2026-10-26:** all **Required** items that can be checked today pass (A-01…A-09,
-A-18), A-10 is partial, and A-17/A-19 are due at the moment the repository goes public and after the
-submission. The **Recommended** exposure items (A-11…A-16) fail; they are configuration-level fixes
-(R-01 port binding, R-08 headers) plus one small middleware (R-02). Without them the demo is safe
-only on a trusted network with no untrusted pages open in the same browser.
+**Gate A verdict on 2026-10-26, after P9:** every **Required** item that can be checked today passes
+(A-01…A-10, A-18), and every **Recommended** exposure item (A-11…A-16) passes. Due later: A-17 (branch protection)
+when the repository is made public, A-19 (key rotation) after the submission, A-20 after the review.
+*At the audit, before P9, A-10 was partial and A-11…A-16 failed.*
 
 ## Gate B — shared or production deployment
 
@@ -76,7 +76,7 @@ Every item is **Required** (reference §9: if one is "no", the capability stays 
 | B-04 | No unnecessary tool, write, delete or network access | The model has no tools (✅); the database role is superuser (❌); internal services on loopback (✅) | R-07 | ❌ |
 | B-05 | Secrets separate from prompts, memory, code and logs; short-lived and revocable | Separation ✅ (scan, `llm/anthropic/client.go:74`, `db.go:26-27`); per-environment keys with spend limits, secret store, rotation procedure ❌ | R-13 | ⚠️ |
 | B-06 | External content is marked untrusted | Brief and customer text in delimited blocks; delimiters neutralised; customer values no longer sent (R-04) | R-04, R-09 | ❌ |
-| B-07 | High-impact actions need exact-action human approval | Confirm dialog shows audience, counts, exclusions and full content (✅); approval bound to the shown content version, protected from CSRF and framing, second approver above a threshold | R-02, R-08, R-11 | ❌ |
+| B-07 | High-impact actions need exact-action human approval | Confirm dialog shows audience, counts, exclusions and full content (✅); protected from CSRF and framing (✅ P9); approval bound to the shown content version and a second approver above a threshold (❌) | R-11 | ❌ |
 | B-08 | Code/tool execution isolated from production and host resources | No execution of model output (N/A); containers non-root, read-only, capabilities dropped | R-13 | ⚠️ |
 | B-09 | Data egress limited by destination and class; DLP | Only lengths (not names) sent to the LLM; provider DPA / zero-retention confirmed; legal basis for transfer | R-04, R-06 | ❌ |
 | B-10 | Step, time, token, tool, data and cost limits | Attempt budget, timeouts and `max_tokens` (✅); rate limit, concurrency cap and token budget with hard stop (❌) | R-03 | ❌ |
@@ -84,12 +84,13 @@ Every item is **Required** (reference §9: if one is "no", the capability stays 
 | B-12 | Kill switch, credential revocation, quarantine and rollback tested | Per-campaign cancel and global send switch, key revocation drill, rollback of prompt/model version | R-05, R-13 | ❌ |
 | B-13 | Adversarial and regression tests meet acceptance thresholds | DSL injection and fault tests (✅); adversarial LLM set on mock in CI and repeated runs on Claude with a harm threshold (❌) | R-09 | ⚠️ |
 | B-14 | Personal-data and sector/regulatory scope assessed | KVKK roles and transfer basis, retention and erasure, commercial-message consent registry; legal sign-off | R-06 | ❌ (not verifiable from code) |
-| B-15 | Classic web security baseline | CSRF/Origin/Host checks, security headers, `ReadTimeout`/`IdleTimeout`, metrics on an internal port, TLS at the edge | R-02, R-08, R-14 | ❌ |
+| B-15 | Classic web security baseline | CSRF/Origin/Host checks and security headers (✅ P9); `ReadTimeout`/`IdleTimeout`, metrics on an internal port, TLS at the edge (❌) | R-14 | ⚠️ |
 | B-16 | Supply chain in CI | `govulncheck`, `npm audit`, gitleaks per pull request, dependency updates, SHA/digest pinning, SBOM, branch protection | R-10 | ❌ |
 | B-17 | Database least privilege and limits | Separate roles, no superuser, `statement_timeout`, TLS to a remote database | R-07 | ❌ |
 
 **Gate B verdict on 2026-10-26: no-go.** The application is not ready for a shared or production
-deployment until at least R-01 … R-08 (all P0) are closed and their verification tests pass.
+deployment until at least R-01 … R-08 (all P0) are closed and their verification tests pass. After P9, R-02 and
+R-08 are closed and R-01 only for the network; authentication (R-01) and R-03 … R-07 remain.
 
 ## Pre-release run sheet
 

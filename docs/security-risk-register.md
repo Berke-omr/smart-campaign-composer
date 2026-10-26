@@ -6,7 +6,8 @@
 | **Code under review** | branch `feat/ci`, commit `68bffe4` |
 | **Scope, method, architecture** | [`security-threat-model.md`](security-threat-model.md) |
 | **Release gate** | [`security-release-checklist.md`](security-release-checklist.md) |
-| **Status** | Audit only: every finding is **Open**; no application code was changed |
+| **Status** | R-02 and R-08 **fixed**, R-01 **partly fixed** (network exposure closed, authentication open) in P9, branch `fix/security-quick-wins` ([§5](#5-remediation-log)); every other finding **Open** |
+| **Line references** | `file:line` evidence points to the audited commit `68bffe4` (`git show 68bffe4:<path>`); P9 changed some of those files |
 
 ## 1. Rating method
 
@@ -28,26 +29,26 @@
 
 ## 2. Ranked summary
 
-| Rank | ID | Finding | Priority | L | I | Score | Demo context | Target |
-|---|---|---|---|---|---|---|---|---|
-| 1 | [R-01](#r-01-no-authentication-and-the-ui-and-api-listen-on-every-interface) | No authentication; UI and API listen on every interface | P0 | 5 | 5 | **25 High** | Anyone on the same network can use the app and trigger paid LLM calls | M1 |
-| 2 | [R-02](#r-02-cross-site-request-forgery-and-dns-rebinding-can-drive-the-whole-flow-up-to-approval) | CSRF and DNS rebinding can drive the flow up to approval | P0 | 3 | 5 | **15 High** | A web page open in the reviewer's browser can create and approve campaigns | M1 |
-| 3 | [R-03](#r-03-no-ceiling-on-llm-spend-or-request-volume) | No ceiling on LLM spend or request volume | P0 | 3 | 4 | **12 Medium** | Reviewer's own key is exposed to cost burn via R-01/R-02 | M1 |
-| 4 | [R-04](#r-04-customer-names-are-sent-to-the-llm-provider-and-returned-by-the-api) | Customer names go to the LLM provider and back out of the API | P0 | 4 | 3 | **12 Medium** | Seed data is fake: no real exposure today | M2 |
-| 5 | [R-05](#r-05-no-way-to-stop-a-campaign-that-is-sending) | No way to stop a campaign that is sending | P0 | 3 | 4 | **12 Medium** | Mock provider: no real messages | M2 |
-| 6 | [R-06](#r-06-retention-erasure-and-legal-basis-for-personal-data-are-undefined) | Retention, erasure and legal basis undefined | P0 (conditional: real data) | 3 | 4 | **12 Medium** | Not applicable to fake data | M2 |
-| 7 | [R-07](#r-07-every-service-uses-one-postgres-superuser-role) | Every service uses one Postgres superuser role | P0 | 2 | 5 | **10 Medium** | Local only; port bound to 127.0.0.1 | M2 |
-| 8 | [R-08](#r-08-no-browser-security-headers-the-approval-dialog-can-be-framed) | No browser security headers; the approval dialog can be framed | P0 | 2 | 4 | **8 Medium** | Clickjacking possible from any page | M1 |
-| 9 | [R-09](#r-09-prompt-injection-and-content-integrity-are-bounded-but-untested) | Prompt injection and content integrity are bounded but untested | P1 | 3 | 3 | **9 Medium** | Marketer reviews every message | M2 |
-| 10 | [R-10](#r-10-supply-chain-and-ci-gates-are-thin) | Supply-chain and CI gates are thin | P1 | 2 | 4 | **8 Medium** | Matters once the repo is public | M1 (branch protection) / M3 |
-| 11 | [R-11](#r-11-approval-is-not-bound-to-the-reviewed-content-and-there-is-no-second-approver) | Approval not bound to the reviewed content; no second approver | P1 | 2 | 3 | **6 Low** | Single user, one tab | M2 |
-| 12 | [R-12](#r-12-no-audit-trail-of-who-did-what-no-alerting) | No audit trail of who did what; no alerting | P1 | 3 | 2 | **6 Low** | Logs are enough for a demo | M3 |
-| 13 | [R-13](#r-13-secret-lifecycle-and-container-hardening) | Secret lifecycle and container hardening | P2 | 2 | 3 | **6 Low** | Rotate the key after the demo | M1 (rotation) / M3 |
-| 14 | [R-14](#r-14-minor-exposure-and-robustness-items) | Minor exposure and robustness items | P2 | 2 | 1 | **2 Low** | — | M3 |
+| Rank | ID | Finding | Priority | L | I | Score | Demo context | Target | Status |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | [R-01](#r-01-no-authentication-and-the-ui-and-api-listen-on-every-interface) | No authentication; UI and API listen on every interface | P0 | 5 | 5 | **25 High** | Anyone on the same network can use the app and trigger paid LLM calls | M1 | Partly fixed (P9) |
+| 2 | [R-02](#r-02-cross-site-request-forgery-and-dns-rebinding-can-drive-the-whole-flow-up-to-approval) | CSRF and DNS rebinding can drive the flow up to approval | P0 | 3 | 5 | **15 High** | A web page open in the reviewer's browser can create and approve campaigns | M1 | Fixed (P9) |
+| 3 | [R-03](#r-03-no-ceiling-on-llm-spend-or-request-volume) | No ceiling on LLM spend or request volume | P0 | 3 | 4 | **12 Medium** | Reviewer's own key is exposed to cost burn via R-01/R-02 | M1 | Open |
+| 4 | [R-04](#r-04-customer-names-are-sent-to-the-llm-provider-and-returned-by-the-api) | Customer names go to the LLM provider and back out of the API | P0 | 4 | 3 | **12 Medium** | Seed data is fake: no real exposure today | M2 | Open |
+| 5 | [R-05](#r-05-no-way-to-stop-a-campaign-that-is-sending) | No way to stop a campaign that is sending | P0 | 3 | 4 | **12 Medium** | Mock provider: no real messages | M2 | Open |
+| 6 | [R-06](#r-06-retention-erasure-and-legal-basis-for-personal-data-are-undefined) | Retention, erasure and legal basis undefined | P0 (conditional: real data) | 3 | 4 | **12 Medium** | Not applicable to fake data | M2 | Open |
+| 7 | [R-07](#r-07-every-service-uses-one-postgres-superuser-role) | Every service uses one Postgres superuser role | P0 | 2 | 5 | **10 Medium** | Local only; port bound to 127.0.0.1 | M2 | Open |
+| 8 | [R-08](#r-08-no-browser-security-headers-the-approval-dialog-can-be-framed) | No browser security headers; the approval dialog can be framed | P0 | 2 | 4 | **8 Medium** | Clickjacking possible from any page | M1 | Fixed (P9) |
+| 9 | [R-09](#r-09-prompt-injection-and-content-integrity-are-bounded-but-untested) | Prompt injection and content integrity are bounded but untested | P1 | 3 | 3 | **9 Medium** | Marketer reviews every message | M2 | Open |
+| 10 | [R-10](#r-10-supply-chain-and-ci-gates-are-thin) | Supply-chain and CI gates are thin | P1 | 2 | 4 | **8 Medium** | Matters once the repo is public | M1 (branch protection) / M3 | Open |
+| 11 | [R-11](#r-11-approval-is-not-bound-to-the-reviewed-content-and-there-is-no-second-approver) | Approval not bound to the reviewed content; no second approver | P1 | 2 | 3 | **6 Low** | Single user, one tab | M2 | Open |
+| 12 | [R-12](#r-12-no-audit-trail-of-who-did-what-no-alerting) | No audit trail of who did what; no alerting | P1 | 3 | 2 | **6 Low** | Logs are enough for a demo | M3 | Open |
+| 13 | [R-13](#r-13-secret-lifecycle-and-container-hardening) | Secret lifecycle and container hardening | P2 | 2 | 3 | **6 Low** | Rotate the key after the demo | M1 (rotation) / M3 | Open |
+| 14 | [R-14](#r-14-minor-exposure-and-robustness-items) | Minor exposure and robustness items | P2 | 2 | 1 | **2 Low** | — | M3 | Open |
 
 Fix order for the least effort per risk removed: R-01 port binding and R-08 headers are configuration
 changes of a few lines; R-02's Content-Type/Origin/Host middleware is one small Go file with tests; these
-three together close the attack chains that work **today** against a reviewer's machine.
+three together close the attack chains that work **today** against a reviewer's machine. *(Done in P9, see [§5](#5-remediation-log).)*
 
 ## 3. Findings
 
@@ -57,7 +58,7 @@ three together close the attack chains that work **today** against a reviewer's 
 |---|---|
 | **Asset / flow** | All `/api/*` routes: campaigns, audience counts, drafts, edit, **approve** (→ mass messaging), dashboard |
 | **Threat scenario** | Any host that can reach the machine opens `http://<host>:8080` (or `:8081`), reads campaigns and the customer names in message reports, burns LLM credit, edits drafts and approves sends (threat model T2) |
-| **Current control** | None in code. Out of scope by assumption A10 ("single marketer, no authentication", `DECISIONS.md:644`), listed in `README.md:118-120`. Internal services (Postgres, worker metrics, mock provider) are bound to `127.0.0.1` |
+| **Current control** | None in code. Out of scope by assumption A10 ("single marketer, no authentication", `DECISIONS.md:644`), listed in `README.md:139-141`. Internal services (Postgres, worker metrics, mock provider) are bound to `127.0.0.1` |
 | **Evidence** | `backend/internal/httpapi/router.go:81-84` (middleware: request id, logger, recoverer only), `:109-142` (routes); `docker-compose.yml:79` (`"${API_HOST_PORT:-8081}:8080"`) and `:154` (`"${UI_HOST_PORT:-8080}:80"`) have no host IP; *probe* `docker compose ps`: `0.0.0.0:8081->8080`, `0.0.0.0:8080->80` (also `[::]`) |
 | **Gap** | No identity, no authorisation per route, publicly bound ports, no audit of the actor |
 | **Likelihood** | 5 in production (an unauthenticated internet-facing admin tool is found quickly); 2 in the demo (needs a shared network) |
@@ -68,7 +69,7 @@ three together close the attack chains that work **today** against a reviewer's 
 | **Compensating control** | Until fixed: run the stack only on a trusted network; stop it when not in use; use `LLM_PROVIDER=mock` when not demonstrating Claude |
 | **Residual risk** | After M1: Low for the demo (local browser only, see R-02). After M2: Low |
 | **Verification test** | `docker compose ps` shows only `127.0.0.1:` bindings; from another host `curl http://<ip>:8080` fails. After M2: an httptest table over every `/api` route asserts 401 without credentials and 403 for `marketer` on approve |
-| **Status** | Open (accepted for the take-home by A10; must not be carried into any shared deployment) |
+| **Status** | **Partly fixed (P9):** ports published on `127.0.0.1` (`docker-compose.yml`, commit `8e2fcb9`); from the LAN address both ports now refuse the connection (before: 200). Authentication (M2) remains open and accepted for the take-home by A10; it must not be carried into any shared deployment |
 
 ### R-02 Cross-site request forgery and DNS rebinding can drive the whole flow up to approval
 
@@ -87,7 +88,7 @@ three together close the attack chains that work **today** against a reviewer's 
 | **Compensating control** | Close the stack when not in use; use a separate browser profile for the demo |
 | **Residual risk** | Low |
 | **Verification test** | httptest cases: `text/plain` POST → 415; `Origin: http://evil.example` → 403; `Sec-Fetch-Site: cross-site` → 403; `Host: evil.example` → 403/421; same-origin JSON → unchanged behaviour. Manual: a test page on another port tries the chain and fails with no campaign created |
-| **Status** | Open |
+| **Status** | **Fixed (P9, commit `3cfbb5e`):** `/api` request guard (`backend/internal/httpapi/guard.go`) with Host allowlist, `Sec-Fetch-Site`, `Origin` = `Host` and JSON-body rules; nginx forwards `$http_host`. Approve still takes no body, so the content-version binding of R-11 remains open. Evidence in [§5](#5-remediation-log) |
 
 ### R-03 No ceiling on LLM spend or request volume
 
@@ -134,7 +135,7 @@ three together close the attack chains that work **today** against a reviewer's 
 | **Asset / flow** | Sending campaigns; provider calls |
 | **Threat scenario** | Threat model T9. A wrong audience, wrong content or an approval obtained through R-02/R-08 cannot be stopped; the only option is stopping the worker container, which stops **all** campaigns and leaves no record |
 | **Current control** | Content locked after approval (A12); confirm dialog states "This can't be undone" (`ConfirmSendModal.vue:81-84`) |
-| **Evidence** | Statuses are `draft, ready, sending, completed, failed` only (`backend/migrations/0002_create_campaigns.sql:12-13`); known gap in `README.md:122-127` and `DECISIONS.md:614,646` |
+| **Evidence** | Statuses are `draft, ready, sending, completed, failed` only (`backend/migrations/0002_create_campaigns.sql:12-13`); known gap in `README.md:143-148` and `DECISIONS.md:614,646` |
 | **Gap** | No per-campaign pause/cancel, no global send switch, no runbook |
 | **Likelihood** | 3 (human error in mass messaging is common) |
 | **Impact** | 4 (irreversible messages to customers; legal/reputational) |
@@ -201,7 +202,7 @@ three together close the attack chains that work **today** against a reviewer's 
 | **Compensating control** | — |
 | **Residual risk** | Low |
 | **Verification test** | `curl -sI http://127.0.0.1:8080/` and `…/assets/<file>.js` both show every header; an `<iframe src="http://localhost:8080">` on another origin stays blank; the UI works with no CSP errors in the console |
-| **Status** | Open |
+| **Status** | **Fixed (P9, commit `a2f12c4`):** `frontend/security-headers.inc` included in the server block and in each location with its own `add_header`; `server_tokens off`; `index.html` served with `Cache-Control: no-cache`. Evidence in [§5](#5-remediation-log) |
 
 ### R-09 Prompt injection and content integrity are bounded but untested
 
@@ -211,7 +212,7 @@ three together close the attack chains that work **today** against a reviewer's 
 | **Threat scenario** | Threat model T7/T8. (a) The brief contains `</brief>` and instructions, or asks for a phishing link; (b) a customer's crafted long first name is quoted into the prompt; (c) the model invents a link, code or price. A plausible-looking message reaches thousands of people if the reviewer misses it |
 | **Current control** | Strong and deterministic: closed JSON schemas (`backend/internal/llm/schemas.go`), strict decoding (`parse.go:134-146`), audience only through the whitelisted DSL (no SQL, consent enforced by the backend), variable whitelist, emoji, length and single-line checks (`backend/internal/content/validate.go:92-134`), prompt rules against invented codes/prices/links (`prompts.go:108`), human approval of the exact content. Tests for DSL injection (`segment/validate_test.go:114`), fault scenarios (`generate_test.go:105`), golden prompts (`llm_test.go:290`) |
 | **Evidence** | `prompts.go:95-97,146` (brief inserted between tags without escaping), `:167-169` (previous answer inserted between tags), `:157` (customer values); `content.Validate` has no link/URL rule (`content/validate.go:92-134`); no adversarial LLM test in `backend/internal/llm/*_test.go` (only DSL-level injection tests) |
-| **Gap** | No delimiter neutralisation, no link policy, no adversarial evaluation set, no repeated real-model runs (only three scenarios were checked on Claude, `README.md:139-140`) |
+| **Gap** | No delimiter neutralisation, no link policy, no adversarial evaluation set, no repeated real-model runs (only three scenarios were checked on Claude, `README.md:160-161`) |
 | **Likelihood** | 3 |
 | **Impact** | 3 (phishing or misleading message under the brand; bounded by review) |
 | **Autonomy / spread** | Whole audience once approved |
@@ -267,7 +268,7 @@ three together close the attack chains that work **today** against a reviewer's 
 | **Asset / flow** | Create, edit, approve; LLM calls; sending |
 | **Threat scenario** | After an incident (unwanted send, cost spike) nobody can tell who approved, from where, which prompt version produced the draft, or notice it while it happens |
 | **Current control** | JSON logs with `request_id`, method, path, status, duration (`backend/internal/httpapi/router.go:156-175`); campaign approval logged (`service.go:297-298`); token usage logged; model id stored per campaign (`0002_create_campaigns.sql:20-21`); prompt changes visible through golden files; Prometheus metrics for LLM attempts and provider calls |
-| **Evidence** | No actor or client IP in logs; no prompt hash per draft; no alert rules (`README.md:138`: no Prometheus server or dashboards); no risk owner/RACI document |
+| **Evidence** | No actor or client IP in logs; no prompt hash per draft; no alert rules (`README.md:159`: no Prometheus server or dashboards); no risk owner/RACI document |
 | **Gap** | Accountability and detection |
 | **Likelihood** | 3 |
 | **Impact** | 2 (slower detection and forensics) |
@@ -334,3 +335,35 @@ three together close the attack chains that work **today** against a reviewer's 
 | Fail-safe drafting | Invalid output becomes `needs_manual_edit`, never auto-approved; refusal handled before parsing | `generate.go:85-101`, `llm/anthropic/client.go:170-182`; test `generate_test.go:267` |
 | Duplicate sends | DB uniqueness + provider idempotency key + lease fencing | `0003:17,41`, `delivery/client.go:65`; tests `queue_test.go:206`, `worker_test.go` |
 | Paid calls from tests and smoke | Tests use the mock and recorded fixtures; smoke forces the mock and refuses Claude | `Makefile:44-46`, `DECISIONS.md:623` |
+
+## 5. Remediation log
+
+### P9 — R-01 (network part), R-08, R-02 (2026-10-26)
+
+Branch `fix/security-quick-wins` (from `feat/ci`), commits `8e2fcb9` (R-01), `a2f12c4` (R-08), `3cfbb5e` (R-02).
+Decisions: `DECISIONS.md` D28. Every check ran on the local stack in mock mode (`/api/config` read first); no paid
+call was made.
+
+| Check | Before (audit) | After (P9) |
+|---|---|---|
+| `docker compose ps`: published bindings of `api` / `frontend` | `0.0.0.0` and `[::]` | `127.0.0.1` only |
+| `curl` to the machine's LAN address on `:8080` / `:8081` | `200` / `200` | connection refused / refused |
+| `curl` to `localhost:8080`, `127.0.0.1:8080`, `localhost:8081/healthz` | `200` | `200` |
+| Security headers on `/`, `/index.html`, an SPA route, `/assets/*.js`, `/api/config`, a 404 | none | all six on every path; `Server: nginx` without version |
+| `<iframe src="http://localhost:8080/?nocache=…">` on `http://127.0.0.1:8765` | — | blank; console: violates `frame-ancestors 'none'`; network: `ERR_BLOCKED_BY_RESPONSE` |
+| Full flow in a browser (brief library → generate → draft stream → edit SMS → approve → live dashboard) | — | every request `200`; 0 CSP violations (`securitypolicyviolation` listener), no console error |
+| `POST /api/segments/preview`, `text/plain` + `Origin: http://attacker.example` (`:8081` and `:8080`) | `200` | `403` |
+| Same with `text/plain` and no `Origin` | `200` | `415` |
+| `GET /api/config` with `Host: attacker.example` | `200` | `403` |
+| `POST /api/segments/preview` JSON without browser headers (curl, scripts) | `200` | `200` |
+| Attack page on `http://127.0.0.1:8765` (threat model T1): `text/plain` create, bodiless approve of ready campaigns 1 and 26, `EventSource` and `<img>` on a draft stream, a `text/plain` form POST to approve | not run (it would send) | every request `403` (Chrome: `ERR_ABORTED` / `ERR_BLOCKED_BY_RESPONSE`); campaigns 27 → 27, deliveries 7,299 → 7,299, campaigns 1 and 26 still `ready`, no draft generated; api logged each rejection with its reason |
+| Guard unit tests (`backend/internal/httpapi/guard_test.go`) | — | 32 cases pass; four mutations (accepting cross-site, skipping the Host check, the JSON-body check, the Origin check) each make them fail |
+| `make test` | pass (CI) | pass: 16 Go packages `ok` (race detector, Postgres), frontend 12 test files |
+| `make smoke` | 40 checks | 52 checks pass: the five scenarios plus six UI-header and six request-guard checks, two of them through nginx |
+
+Found while verifying: the browser kept a heuristically cached `index.html` (served without `Cache-Control`) with its
+old headers, so the first framing test still rendered the app. `location /` now sends `Cache-Control: no-cache`
+(D28 S6).
+
+Still open from these findings: authentication and per-route authorisation (R-01, M2); approval bound to the reviewed
+content (R-11).

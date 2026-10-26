@@ -1,7 +1,7 @@
 # Decisions
 
 > **Status: final (2026-10-26).** Decisions were made during planning (P0) and updated as each
-> phase confirmed or changed them; D23–D27 record what was built. Each entry records the options
+> phase confirmed or changed them; D23–D28 record what was built. Each entry records the options
 > considered, the choice, and the trade-off accepted. Requirement IDs (R1…, U1…) refer to
 > [`docs/PLAN.md`](docs/PLAN.md).
 >
@@ -39,6 +39,7 @@
 | D25 | Tracking as built (P5) | Accepted (P5) |
 | D26 | Frontend as built (P6) | Accepted (P6) |
 | D27 | Hardening and submission (P7) | Accepted (P7) |
+| D28 | Security quick wins after the audit (P9) | Accepted (P9) |
 
 ---
 
@@ -625,6 +626,25 @@ Decisions taken at the start of P7 (approved together). Evidence: PLAN.md → Ve
 | H3 | api stop grace period | No change: the api already has `stop_grace_period: 10s` with `HTTP_SHUTDOWN_TIMEOUT: 8s` (added in P5) | Checked on the running stack: `StopTimeout` is 10 for the api and the worker |
 | H4 | Repository visibility | Public at submission, after the history scan is clean and the P7 pull request is merged. The developer changes the setting | Reviewers can open it without being invited by GitHub user name, which the HR email does not give. Nothing in the history is secret (H2) |
 | H5 | CI (bonus B4) | GitHub Actions running `make test`, in its own pull request after P7, limited to one hour; dropped and listed in the README if it is not green by then | The cheapest bonus and the last one in the cut order; kept out of the P7 pull request so submission does not wait for it |
+
+---
+
+## D28 — Security quick wins after the audit (P9)
+
+A security audit on submission day (`docs/security-threat-model.md`, `docs/security-risk-register.md`,
+`docs/security-release-checklist.md`) found that, with no authentication (A10), three paths let someone other than
+the marketer drive the app on a reviewer's machine: the network (R-01), another page in the same browser (R-02) and
+framing (R-08). P9 closes those three; the other findings stay in the risk register. Evidence: PLAN.md → Verification
+log → P9.
+
+| # | Topic | Decision | Why |
+|---|---|---|---|
+| S1 | Published ports | The UI and api ports are published on `127.0.0.1`, like Postgres, the worker's metrics and the mock provider. The api port stays published (health, metrics and the curl examples use it) | Both were bound to every interface: any host on the same network could create and approve campaigns. Not publishing `:8081` would have broken the documented URLs for no gain once it is loopback-only |
+| S2 | CSRF defence | Browser request metadata, not a token: `Sec-Fetch-Site` must be `same-origin` or `none` when sent; on unsafe methods `Origin` must equal `Host` when sent, and a body must be `application/json` (415). Bodiless requests (`POST …/approve`) need no `Content-Type` | Keeps the API contract, the frontend, the smoke test and the curl examples unchanged on submission day. The alternative, `application/json` required on every unsafe request, would change the approve contract; it comes naturally with a content-version body for approval (risk R-11). A browser that sends neither header does not exist among current browsers |
+| S3 | DNS rebinding | `Host` allowlist from `HTTP_ALLOWED_HOSTS`, default `localhost`, `127.0.0.1`, `::1`, `api` (the smoke test on the compose network); an empty setting uses the default, never "allow all". nginx forwards `$http_host`, so `Origin` and `Host` compare with their ports | A rebinding page reaches 127.0.0.1 but still sends its own domain as `Host`. `$host` would drop the port and every same-origin POST through nginx would fail the `Origin` check |
+| S4 | Guard scope | `/api` only; `/healthz`, `/readyz` and `/metrics` stay outside. Rejections are logged with the reason (no bodies) | Probes and scrapers call with their own `Host` and change nothing |
+| S5 | Browser headers | One nginx include with CSP (`frame-ancestors 'none'`, no `'unsafe-inline'`), `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy: no-referrer`, `Permissions-Policy`, COOP; repeated in every location with its own `add_header`; `server_tokens off` | The build has no inline script or style (checked), so the strict CSP held through the whole flow with no violation. nginx drops server-level `add_header` in a location that sets its own, which would have left `/assets/` without them |
+| S6 | `index.html` caching | `Cache-Control: no-cache` on `location /` | Found while verifying S5: the browser reused a heuristically cached `index.html` with its old headers, so framing was blocked only with a cache-busting URL |
 
 ---
 

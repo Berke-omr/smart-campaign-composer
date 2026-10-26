@@ -43,8 +43,9 @@ set, so **every brief is a paid API call**. `LLM_PROVIDER=mock` forces the mock 
 | Mock provider (debug) | http://127.0.0.1:18090/healthz |
 | PostgreSQL | `127.0.0.1:55432` (user/password/db: `scc`) |
 
-The first start seeds 5,000 fake users (seed 42). Ports, the seed size and the mock provider's fault
-rates can be changed in `.env` (see `.env.example`). The API contract is in [`docs/API.md`](docs/API.md).
+Every port is published on `127.0.0.1` only. The first start seeds 5,000 fake users (seed 42). Ports, the
+seed size and the mock provider's fault rates can be changed in `.env` (see `.env.example`). The API contract
+is in [`docs/API.md`](docs/API.md).
 
 ## How it works
 
@@ -112,6 +113,23 @@ make smoke    # end-to-end through the API on the running stack (mock LLM only)
 | `make reseed` | Delete all users **and campaigns**, then seed again |
 | `make psql` | Open a SQL shell |
 
+## Security notes
+
+There is no login (a single marketer, A10), so the stack is meant for your own machine:
+
+- every port is bound to `127.0.0.1`, so other hosts on the network cannot reach the UI or the API;
+- the API refuses requests that another web page could send through your browser: a foreign `Host`
+  (DNS rebinding), a cross-site `Sec-Fetch-Site`, a foreign `Origin`, or a non-JSON body
+  ([`docs/API.md`](docs/API.md) → Conventions). If you open the UI under another host name, add it to
+  `HTTP_ALLOWED_HOSTS`;
+- nginx sends a strict Content-Security-Policy and refuses to be framed;
+- with a key in `.env`, every brief is a paid Claude call; use `LLM_PROVIDER=mock` when you only try the flow.
+
+The security audit, its findings (what is fixed and what is still open, for example a way to stop a
+sending campaign) and the release checklist are in [`docs/security-threat-model.md`](docs/security-threat-model.md),
+[`docs/security-risk-register.md`](docs/security-risk-register.md) and
+[`docs/security-release-checklist.md`](docs/security-release-checklist.md).
+
 ## Known gaps
 
 Not built, by choice or for time (the reasons are in DECISIONS.md):
@@ -119,7 +137,7 @@ Not built, by choice or for time (the reasons are in DECISIONS.md):
 - **Bonus items:** scheduled sending, A/B variants and per-user language were not built (CI was:
   see [Tests](#tests)).
 - **Scope:**
-  - authentication and multi-tenancy (a single marketer, A10);
+  - authentication and multi-tenancy (a single marketer, A10; see [Security notes](#security-notes));
   - delivery-receipt webhooks: the status is the provider's synchronous answer (A8);
   - quiet hours and frequency capping.
 - **Sending:**
@@ -148,7 +166,7 @@ Not built, by choice or for time (the reasons are in DECISIONS.md):
 backend/      Go module: cmd/{api,worker,mockprovider,migrate,seed,smoke}, internal/…, migrations/
 frontend/     Vue 3 + Vite + TypeScript, served by nginx
 docs/         CASE.md (the brief), PLAN.md (phases and evidence), API.md (contract),
-              TEST-SCENARIOS.md (end-to-end scenarios)
+              TEST-SCENARIOS.md (end-to-end scenarios), security-*.md (audit, risks, checklist)
 DECISIONS.md  Decisions, assumptions and what is out of scope
 .github/      CI workflow (make test)
 DESIGN.md     Visual reference for the UI
