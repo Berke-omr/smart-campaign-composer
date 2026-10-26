@@ -23,7 +23,7 @@
 | P5 | Tracking (SSE, metrics, health) | ✅ done (PR, branch `feat/p5-tracking`) | 2026-10-21 |
 | P6 | Frontend | ✅ done (PR, branch `feat/p6-frontend`) | 2026-10-21 |
 | P7 | Hardening & submission | ✅ done (PR, branch `feat/p7-hardening`) | 2026-10-26 |
-| P8 | Bonus (optional) | ⬜ | — |
+| P8 | Bonus (optional) | ✅ B4 CI only (PR, branch `feat/ci`); B1–B3 not built | 2026-10-26 |
 
 ---
 
@@ -837,3 +837,14 @@ it checks:
 
 **Not verified:** a clean clone on a machine without cached Docker images (the base images and build layers were
 already present here), and an amd64 host.
+
+### P8
+
+Only B4 (CI) was built, in its own pull request after P7 (D27 H5). `.github/workflows/ci.yml` runs `make test` on
+`ubuntu-24.04` for every push to `main` and every pull request, with read-only permissions and no secrets.
+
+| Criterion | Evidence | Result |
+|---|---|---|
+| `make test` passes on GitHub Actions | run `40244495916` on the CI pull request (commit `68bffe4`) | `success` in 3 min 45 s: 16 Go packages `ok`, frontend 12 files / 108 tests, no `FAIL` in the log |
+
+B1 (scheduled sending), B2 (A/B variants), B3 (per-user language) and the LLM eval suite were cut (cut order, items 1 and 2).

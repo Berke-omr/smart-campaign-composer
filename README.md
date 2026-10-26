@@ -99,6 +99,8 @@ make smoke    # end-to-end through the API on the running stack (mock LLM only)
   users, seed 42).
 - [`docs/TEST-SCENARIOS.md`](docs/TEST-SCENARIOS.md) has 20 briefs a marketer would write, with the
   expected rule, audience and outcome, to try by hand in the UI or with `curl`.
+- **CI:** GitHub Actions runs `make test` on every push to `main` and every pull request
+  ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), with no secrets.
 
 ## Useful commands
 
@@ -114,7 +116,8 @@ make smoke    # end-to-end through the API on the running stack (mock LLM only)
 
 Not built, by choice or for time (the reasons are in DECISIONS.md):
 
-- **Bonus items:** scheduled sending, A/B variants, per-user language and CI were not built.
+- **Bonus items:** scheduled sending, A/B variants and per-user language were not built (CI was:
+  see [Tests](#tests)).
 - **Scope:**
   - authentication and multi-tenancy (a single marketer, A10);
   - delivery-receipt webhooks: the status is the provider's synchronous answer (A8);
@@ -147,6 +150,7 @@ frontend/     Vue 3 + Vite + TypeScript, served by nginx
 docs/         CASE.md (the brief), PLAN.md (phases and evidence), API.md (contract),
               TEST-SCENARIOS.md (end-to-end scenarios)
 DECISIONS.md  Decisions, assumptions and what is out of scope
+.github/      CI workflow (make test)
 DESIGN.md     Visual reference for the UI
 ai-sessions/  Exported Claude Code sessions, with an index
 ```

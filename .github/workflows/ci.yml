@@ -1,0 +1,24 @@
+# Runs the same `make test` as a developer machine: every suite in containers,
+# against a throwaway Postgres, with no API key (the tests use the mock LLM).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: make test
+        run: make test
