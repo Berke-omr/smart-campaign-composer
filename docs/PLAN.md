@@ -24,6 +24,7 @@
 | P6 | Frontend | ✅ done (PR, branch `feat/p6-frontend`) | 2026-10-21 |
 | P7 | Hardening & submission | ✅ done (PR, branch `feat/p7-hardening`) | 2026-10-26 |
 | P8 | Bonus (optional) | ✅ B4 CI only (PR, branch `feat/ci`); B1–B3 not built | 2026-10-26 |
+| P9 | Security quick wins (audit R-01, R-08, R-02) | ✅ done (PR, branch `fix/security-quick-wins`) | 2026-10-26 |
 
 ---
 
@@ -177,6 +178,27 @@ IDs are referenced from tests and commits so reviewers can see which requirement
 | LLM eval (`make eval`, needs a key) | 2 h | not a bonus in the case, but strengthens the LLM score |
 | B3 Per-user language content | 3 h | seed already has a `language` field |
 | B2 A/B variants | 4 h | |
+
+### P9 — Security quick wins (after the security audit)
+The audit of 2026-10-26 ([`security-threat-model.md`](security-threat-model.md),
+[`security-risk-register.md`](security-risk-register.md), [`security-release-checklist.md`](security-release-checklist.md))
+found three attack paths that work against a reviewer's machine today. P9 closes them; authentication, approval
+version binding (R-11) and UUID campaign ids stay out of scope.
+- **Decisions (approved):** CSRF defence from browser request metadata (`Sec-Fetch-Site`, `Origin`, `Host`), with
+  `Content-Type: application/json` required only on requests that have a body, so the API contract does not change;
+  the api port stays published, on `127.0.0.1`; the branch starts from `feat/ci` (PR #11 not merged yet).
+- **Step 1 — R-01:** publish the UI and api ports on `127.0.0.1` only; README "Security notes".
+- **Step 2 — R-08:** nginx security headers (CSP with `frame-ancestors 'none'`, `X-Frame-Options`, `nosniff`,
+  `Referrer-Policy`, `Permissions-Policy`, COOP) from one include file, repeated in `location /assets/`;
+  `server_tokens off`; smoke checks the headers.
+- **Step 3 — R-02:** `/api` guard middleware: `Host` allowlist (`HTTP_ALLOWED_HOSTS`, default
+  `localhost,127.0.0.1,::1,api`, fail closed); `Sec-Fetch-Site` must be `same-origin` or `none` when present; on
+  unsafe methods `Origin` must equal `Host` and a body must be JSON (415). nginx forwards `$http_host`. Table tests,
+  smoke negatives, and an attack page on another origin.
+- **Step 4 — docs:** API.md "Request guards", DECISIONS.md, README, audit documents (R-01/R-02/R-08 fixed, checklist
+  A-11…A-16), verification log.
+- **Done when:** `make test` and `make smoke` pass; checklist A-11…A-16 give the expected output; the full flow works
+  in a browser with no CSP violation; the attack page creates no campaign; CI is green.
 
 ---
 
@@ -848,3 +870,31 @@ Only B4 (CI) was built, in its own pull request after P7 (D27 H5). `.github/work
 | `make test` passes on GitHub Actions | run `40244495916` on the CI pull request (commit `68bffe4`) | `success` in 3 min 45 s: 16 Go packages `ok`, frontend 12 files / 108 tests, no `FAIL` in the log |
 
 B1 (scheduled sending), B2 (A/B variants), B3 (per-user language) and the LLM eval suite were cut (cut order, items 1 and 2).
+
+---
+
+### P9
+
+Run on 2026-10-26 on the local stack in mock mode (`/api/config` read before every browser or API check); no paid
+call was made. The full before/after table is in [`security-risk-register.md`](security-risk-register.md) §5.
+
+**Done criteria:**
+
+| Criterion | Evidence | Result |
+|---|---|---|
+| `make test` passes | `make test` after commit `3cfbb5e` | exit 0: 16 Go packages `ok` (`-race`, Postgres), frontend 12 test files |
+| `make smoke` passes | `make smoke` | 52 checks passed, 0 failed (31–32 s): the five scenarios, 6 UI-header checks, 6 request-guard checks (2 through nginx) |
+| Checklist A-11…A-16 | the commands of [`security-release-checklist.md`](security-release-checklist.md), run verbatim | no `0.0.0.0`/`[::]` binding; `415`; `403`; `403`; 4 headers on `/` and on an asset; `Server: nginx` |
+| Not reachable from the network | `curl` to the machine's LAN address, `:8080` and `:8081` | before: `200` / `200`; after: connection refused |
+| Full flow in a browser, no CSP violation | built-in browser: brief library → generate → draft stream → edit SMS (PUT) → approve → live dashboard, with a `securitypolicyviolation` listener | every request `200`; 0 violations; no console error; campaign completed (2,118 messages) |
+| Framing blocked | page on `http://127.0.0.1:8765` with `<iframe src="http://localhost:8080/?nocache=…">` | blank; `frame-ancestors 'none'` violation; `ERR_BLOCKED_BY_RESPONSE` |
+| Attack page creates nothing | page on `http://127.0.0.1:8765`: `text/plain` create, bodiless approve of campaigns 1 and 26, `EventSource` + `<img>` on a draft stream, `text/plain` form POST | all `403`; campaigns 27 → 27, deliveries 7,299 → 7,299, campaigns 1 and 26 still `ready`; rejections logged with reasons |
+| Guard tests catch regressions | four hand-made mutations of `guard.go` (accept cross-site, skip Host, skip JSON body, skip Origin) | each one fails `go test -run Guard` |
+| CI green | — | pending: needs the pull request |
+
+**Found while verifying:** the first framing test still showed the app. The browser had reused a heuristically cached
+`index.html` (served without `Cache-Control`) with its old headers; a cache-busting URL was blocked. `location /` now
+sends `Cache-Control: no-cache` (D28 S6).
+
+**Not done here (on purpose):** PR #11 (CI) could not be merged from this session (the merge needs the developer), so
+this branch starts from `feat/ci`; its pull request shows the CI commits until #11 is merged.

@@ -275,7 +275,7 @@ func TestEventsStopWhenTheClientLeaves(t *testing.T) {
 	h := NewRouter(Deps{Logger: logging.Discard(), Tracking: f, SnapshotEvery: 5 * time.Millisecond})
 	ctx, cancel := context.WithCancel(context.Background())
 	rec := &recorder{header: http.Header{}}
-	done := serveUntilReturn(h, rec, httptest.NewRequest(http.MethodGet, "/api/campaigns/1/events", nil).WithContext(ctx))
+	done := serveUntilReturn(h, rec, localRequest(http.MethodGet, "/api/campaigns/1/events", nil).WithContext(ctx))
 
 	for rec.count() < 3 {
 		select {
@@ -303,7 +303,7 @@ func TestEventsStopWhenWritingFails(t *testing.T) {
 	f := &fakeTracking{script: []result{snap("sending", 1)}}
 	h := NewRouter(Deps{Logger: logging.Discard(), Tracking: f, SnapshotEvery: 5 * time.Millisecond})
 	rec := &recorder{header: http.Header{}, failAfter: 2}
-	done := serveUntilReturn(h, rec, httptest.NewRequest(http.MethodGet, "/api/campaigns/1/events", nil))
+	done := serveUntilReturn(h, rec, localRequest(http.MethodGet, "/api/campaigns/1/events", nil))
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):

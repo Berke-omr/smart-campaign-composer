@@ -44,6 +44,9 @@ type Deps struct {
 	DB Pinger
 	// Metrics serves /metrics (Prometheus); nil leaves the route out.
 	Metrics http.Handler
+	// AllowedHosts are the host names /api answers under (requestGuard);
+	// empty means DefaultAllowedHosts.
+	AllowedHosts []string
 }
 
 // Pinger checks that the database answers. *pgxpool.Pool implements it.
@@ -106,7 +109,10 @@ func NewRouter(d Deps) http.Handler {
 		})
 	}
 
+	// Probes and /metrics stay outside the guard: they change nothing and are
+	// called by Docker and scrapers with their own Host.
 	r.Route("/api", func(r chi.Router) {
+		r.Use(requestGuard(d.Logger, d.AllowedHosts))
 		r.Get("/stats/users", func(w http.ResponseWriter, req *http.Request) {
 			stats, err := d.UserStats.Stats(req.Context())
 			if err != nil {

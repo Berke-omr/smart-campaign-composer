@@ -38,6 +38,9 @@ type Common struct {
 type HTTP struct {
 	Addr            string
 	ShutdownTimeout time.Duration
+	// AllowedHosts are the host names the api answers under
+	// (HTTP_ALLOWED_HOSTS, comma-separated); nil means the api's default.
+	AllowedHosts []string
 }
 
 // Database holds PostgreSQL connection settings.
@@ -176,6 +179,7 @@ func LoadHTTP(env Lookup) (HTTP, error) {
 	c := HTTP{
 		Addr:            r.str("HTTP_ADDR", ":8080"),
 		ShutdownTimeout: r.duration("HTTP_SHUTDOWN_TIMEOUT", 10*time.Second),
+		AllowedHosts:    r.list("HTTP_ALLOWED_HOSTS"),
 	}
 	return c, r.err()
 }
@@ -213,6 +217,18 @@ func (r *reader) str(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// list reads a comma-separated list; unset or empty is nil.
+func (r *reader) list(key string) []string {
+	v, _ := r.env(key)
+	var out []string
+	for _, item := range strings.Split(v, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func (r *reader) required(key string) string {

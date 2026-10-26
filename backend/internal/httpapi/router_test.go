@@ -31,7 +31,7 @@ func serve(t *testing.T, d Deps, method, path string) *httptest.ResponseRecorder
 		d.Logger = logging.Discard()
 	}
 	rec := httptest.NewRecorder()
-	NewRouter(d).ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+	NewRouter(d).ServeHTTP(rec, localRequest(method, path, nil))
 	return rec
 }
 

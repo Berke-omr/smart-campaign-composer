@@ -19,4 +19,6 @@ RUN npm run build
 
 FROM nginx:1.30.6-alpine AS runtime
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Not under conf.d/, which nginx includes on its own at the http level.
+COPY security-headers.inc /etc/nginx/security-headers.inc
 COPY --from=build /app/dist /usr/share/nginx/html

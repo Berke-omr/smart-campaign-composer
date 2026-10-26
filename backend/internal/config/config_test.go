@@ -22,8 +22,8 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadHTTP: %v", err)
 	}
-	if httpCfg.Addr != ":8080" || httpCfg.ShutdownTimeout != 10*time.Second {
-		t.Errorf("HTTP = %+v, want :8080 / 10s", httpCfg)
+	if httpCfg.Addr != ":8080" || httpCfg.ShutdownTimeout != 10*time.Second || httpCfg.AllowedHosts != nil {
+		t.Errorf("HTTP = %+v, want :8080 / 10s / no allowed hosts (the api's default)", httpCfg)
 	}
 
 	db, err := LoadDatabase(env)
@@ -48,6 +48,7 @@ func TestLoadOverrides(t *testing.T) {
 		"LOG_LEVEL":             "debug",
 		"HTTP_ADDR":             ":9999",
 		"HTTP_SHUTDOWN_TIMEOUT": "3s",
+		"HTTP_ALLOWED_HOSTS":    " composer.example.com, ,localhost ",
 		"DATABASE_URL":          "postgres://y",
 		"DATABASE_MAX_CONNS":    "25",
 		"SEED_USERS":            "1200",
@@ -62,7 +63,8 @@ func TestLoadOverrides(t *testing.T) {
 	if common.LogLevel != slog.LevelDebug {
 		t.Errorf("LogLevel = %v, want debug", common.LogLevel)
 	}
-	if httpCfg.Addr != ":9999" || httpCfg.ShutdownTimeout != 3*time.Second {
+	if httpCfg.Addr != ":9999" || httpCfg.ShutdownTimeout != 3*time.Second ||
+		strings.Join(httpCfg.AllowedHosts, "|") != "composer.example.com|localhost" {
 		t.Errorf("HTTP = %+v", httpCfg)
 	}
 	if db.URL != "postgres://y" || db.MaxConns != 25 {

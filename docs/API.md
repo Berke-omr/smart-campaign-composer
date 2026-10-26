@@ -5,17 +5,29 @@
 
 ## Conventions
 
-- Base URL: `http://localhost:8080/api` through the frontend's nginx (the api itself listens on `:8081`).
-  nginx does not buffer `/api/`, so server-sent events arrive as they are written.
+- Base URL: `http://localhost:8080/api` through the frontend's nginx (the api itself listens on `:8081`). Both
+  ports are published on `127.0.0.1` only. nginx does not buffer `/api/`, so server-sent events arrive as they are
+  written, and it forwards the browser's `Host` with its port.
 - Request and response bodies are JSON (UTF-8). Request bodies are decoded strictly: an unknown key is a `422`.
+- **Request guard** (every `/api` route; not `/healthz`, `/readyz`, `/metrics`). The api has no authentication, so it
+  refuses requests that another web page could make through the marketer's browser (security audit R-02):
+  - `Host` must be one of `HTTP_ALLOWED_HOSTS` (default `localhost`, `127.0.0.1`, `::1`, `api`), ignoring the port;
+  - `Sec-Fetch-Site`, when sent, must be `same-origin` or `none`;
+  - on `POST`/`PUT`/`PATCH`/`DELETE`, `Origin`, when sent, must equal `Host`, and a request with a body must have
+    `Content-Type: application/json`. A request without a body (`POST …/approve`) needs no `Content-Type`.
+
+  Clients that are not browsers (curl, scripts) send neither `Origin` nor `Sec-Fetch-Site`; they only need an allowed
+  host and a JSON content type on bodies, as in [Try it](#try-it).
 - Lengths are Unicode characters (runes), never bytes.
 - Errors:
 
   | Status | Body | When |
   |---|---|---|
+  | `403` | `{"error": "unknown host"}`, `{"error": "cross-site requests are not allowed"}`, `{"error": "cross-origin requests are not allowed"}` | refused by the request guard |
   | `404` | `{"error": "campaign not found"}` | unknown id or channel |
   | `409` | `{"error": "..."}` | content is locked, drafts are already being written, or the campaign is not ready to approve |
   | `413` | `{"error": "request body is too large"}` | body over 64 KB |
+  | `415` | `{"error": "request body must be application/json"}` | a body sent with another `Content-Type` (request guard) |
   | `422` | `{"error": "...", "details": ["...", ...]}` | invalid input; `details` lists every problem |
   | `422` | `{"error": "invalid content", "report": {...}}` | an edited message failed validation (see [Report](#report)) |
   | `422` | `{"error": "...", "channel": "sms", "report": {...}}` | at approval, a message no longer fits the audience |

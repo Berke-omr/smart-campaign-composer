@@ -70,13 +70,17 @@ services:
       # On SIGTERM open streams end at once and other requests get up to 8 s,
       # inside the grace period below.
       HTTP_SHUTDOWN_TIMEOUT: 8s
+      # Host names /api answers under; empty: localhost, 127.0.0.1, ::1 and api.
+      HTTP_ALLOWED_HOSTS: ${HTTP_ALLOWED_HOSTS:-}
       # Empty values fall back to the api's defaults: LLM_PROVIDER=auto (Claude when
       # a key is set, the mock LLM otherwise) and LLM_MODEL=claude-sonnet-5-5.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-}
       LLM_MODEL: ${LLM_MODEL:-}
+    # Published on localhost only: the api has no authentication (A10), so it
+    # must not be reachable from the network (security audit R-01).
     ports:
-      - "${API_HOST_PORT:-8081}:8080"
+      - "127.0.0.1:${API_HOST_PORT:-8081}:8080"
     healthcheck: *http-healthcheck
     depends_on:
       seed:
@@ -143,6 +147,7 @@ services:
     command: ["/app/smoke"]
     environment:
       SMOKE_API_URL: http://api:8080
+      SMOKE_UI_URL: http://frontend
     profiles: ["smoke"]
 
   frontend:
@@ -150,8 +155,9 @@ services:
       context: ./frontend
       target: runtime
     image: smart-campaign-composer/frontend:local
+    # Localhost only, like the api it proxies (security audit R-01).
     ports:
-      - "${UI_HOST_PORT:-8080}:80"
+      - "127.0.0.1:${UI_HOST_PORT:-8080}:80"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 5s

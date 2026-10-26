@@ -41,7 +41,8 @@ func segmentDeps(c *fakeCounter) Deps {
 func post(t *testing.T, d Deps, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/segments/preview", strings.NewReader(body))
+	req := localRequest(http.MethodPost, "/api/segments/preview", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	NewRouter(d).ServeHTTP(rec, req)
 	return rec
 }
@@ -122,7 +123,7 @@ func TestSegmentPreviewCountFailureIsGeneric(t *testing.T) {
 
 func TestSegmentFields(t *testing.T) {
 	rec := httptest.NewRecorder()
-	NewRouter(segmentDeps(&fakeCounter{})).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/segments/fields", nil))
+	NewRouter(segmentDeps(&fakeCounter{})).ServeHTTP(rec, localRequest(http.MethodGet, "/api/segments/fields", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
